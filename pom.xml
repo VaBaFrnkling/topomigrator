@@ -8,6 +8,56 @@
   <name>topomigrator</name>
   <url>http://maven.apache.org</url>
   <dependencies>
+    <!-- Parser de archivos YAML: se usa para leer y procesar el fichero Contrato.yaml
+         que define el esquema de migración (tablas origen/destino, transformaciones, validaciones) -->
+    <dependency>
+      <groupId>org.yaml</groupId>
+      <artifactId>snakeyaml</artifactId>
+      <version>2.2</version>
+    </dependency>
+
+    <!-- Librería de Google para serializar/deserializar objetos Java a JSON y viceversa:
+         se utiliza para generar y leer los ficheros de trazabilidad y auditoría (.json) -->
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <version>2.10.1</version>
+    </dependency>
+
+    <!-- Cliente HTTP 5 de Apache: permite realizar peticiones HTTP
+         (útil para conexiones a APIs REST o servicios externos durante la migración) -->
+    <dependency>
+      <groupId>org.apache.httpcomponents.client5</groupId>
+      <artifactId>httpclient5</artifactId>
+      <version>5.3.1</version>
+    </dependency>
+
+    <!-- Driver JDBC de PostgreSQL: proporciona la conexión a bases de datos PostgreSQL,
+         que son el origen y/o destino de los datos en el proceso de migración -->
+    <dependency>
+      <groupId>org.postgresql</groupId>
+      <artifactId>postgresql</artifactId>
+      <version>42.7.3</version>
+    </dependency>
+
+    <!-- API de logging SLF4J: fachada de logging que permite escribir mensajes de log
+         de forma independiente a la implementación concreta de logging utilizada -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>2.0.12</version>
+    </dependency>
+
+    <!-- Implementación de logging Logback: backend que procesa los mensajes de SLF4J,
+         proporcionando salida por consola/fichero con niveles (DEBUG, INFO, WARN, ERROR) -->
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <version>1.5.6</version>
+    </dependency>
+
+    <!-- Framework de testing JUnit: permite escribir y ejecutar tests unitarios
+         para verificar el correcto funcionamiento de los componentes del migrador -->
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
