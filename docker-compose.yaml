@@ -1,0 +1,88 @@
+services:
+
+  topomigrator:
+    build: .
+    container_name: topomigrator
+    depends_on:
+      postgres-source:
+        condition: service_healthy
+      postgres-target:
+        condition: service_healthy
+      nifi:
+        condition: service_started
+    volumes:
+      - ./configs:/app/configs
+      - ./changelogs:/app/changelogs
+      - ./flows:/app/flows
+      - ./outputs:/app/outputs
+    environment:
+      SOURCE_DB_URL: jdbc:postgresql://postgres-source:5432/source_db
+      SOURCE_DB_USER: source_user
+      SOURCE_DB_PASSWORD: source_password
+
+      TARGET_DB_URL: jdbc:postgresql://postgres-target:5432/target_db
+      TARGET_DB_USER: target_user
+      TARGET_DB_PASSWORD: target_password
+
+      NIFI_BASE_URL: https://nifi:8443/nifi-api
+      MIGRATION_CONFIG_PATH: /app/configs/migration-demo.yaml
+    networks:
+      - topomigrator-net
+
+  postgres-source:
+    image: postgres:16.8
+    container_name: postgres-source
+    environment:
+      POSTGRES_DB: source_db
+      POSTGRES_USER: source_user
+      POSTGRES_PASSWORD: source_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_source_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U source_user -d source_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - topomigrator-net
+
+  postgres-target:
+    image: postgres:16.8
+    container_name: postgres-target
+    environment:
+      POSTGRES_DB: target_db
+      POSTGRES_USER: target_user
+      POSTGRES_PASSWORD: target_password
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_target_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U target_user -d target_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - topomigrator-net
+
+  nifi:
+    image: apache/nifi:2.0.0
+    container_name: nifi
+    environment:
+      NIFI_WEB_HTTPS_PORT: 8443
+      SINGLE_USER_CREDENTIALS_USERNAME: admin
+      SINGLE_USER_CREDENTIALS_PASSWORD: Admin123456!!
+    ports:
+      - "8443:8443"
+    networks:
+      - topomigrator-net
+
+volumes:
+  postgres_source_data:
+  postgres_target_data:
+
+networks:
+  topomigrator-net:
+    driver: bridge
