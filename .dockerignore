@@ -1,0 +1,25 @@
+# Maven
+target/
+
+# Git
+.git
+.gitignore
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# Logs
+*.log
+
+# Outputs del sistema (no subir resultados)
+outputs/
+
+# BBDD
+BBDD/
+
+# Sistema operativo
+.DS_Store
+Thumbs.db
+

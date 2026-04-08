@@ -1,0 +1,39 @@
+migration:
+  name: migracion_relacional_demo
+  description: "Migración de varias tablas entre esquemas..."
+  version: 0.1
+  author: nombre_autor
+
+liquibase:
+  changelog: "classpath:/db/changelog/changelog-master.yaml"
+
+tables:
+  nombre_tabla_1:
+    source:
+      schema: nombre_esquema
+      table: nombre_tabla
+    target:
+      schema: nombre_esquema
+      table: nombre_tabla
+    enabled: true
+    migrationType: full
+    incrementalConfig:
+      column: nombre_columna
+      startValue: "2026-01-01T00:00:00"
+    filters:
+      where: "condicion SQL"
+    transformations:
+      columns:
+        nombre_columna:
+          rename: nuevo_nombre
+          type: tipo_destino
+          trim: true
+          nullDefault: valor
+          case: uppercase
+    validations:
+      rowCountCheck: true
+      foreignKeyChecks: true
+      columns:
+        nombre_columna:
+          notNull: true
+          unique: true

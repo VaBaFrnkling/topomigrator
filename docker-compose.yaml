@@ -1,8 +1,14 @@
+# Docker Compose para topomigrator
+# Levanta 4 servicios: app principal, 2 bases de datos (origen/destino) y Apache NiFi.
+# Uso: docker compose up --build
+
 services:
 
+  # Aplicación principal — se construye desde el Dockerfile del proyecto
   topomigrator:
     build: .
     container_name: topomigrator
+    # Espera a que las BDs estén listas (healthy) y NiFi haya arrancado
     depends_on:
       postgres-source:
         condition: service_healthy
@@ -10,27 +16,30 @@ services:
         condition: service_healthy
       nifi:
         condition: service_started
+    # Carpetas compartidas entre el host y el contenedor
     volumes:
-      - ./configs:/app/configs
-      - ./changelogs:/app/changelogs
-      - ./flows:/app/flows
-      - ./outputs:/app/outputs
+      - ./configs:/app/configs # Configuración de entrada
+      - ./changelogs:/app/changelogs # Changelogs Liquibase generados
+      - ./flows:/app/flows # Flows NiFi generados
+      - ./outputs:/app/outputs # Logs, errores y trazas
     environment:
+      # Conexión BD origen
       SOURCE_DB_URL: jdbc:postgresql://postgres-source:5432/source_db
       SOURCE_DB_USER: source_user
       SOURCE_DB_PASSWORD: source_password
-
+      # Conexión BD destino
       TARGET_DB_URL: jdbc:postgresql://postgres-target:5432/target_db
       TARGET_DB_USER: target_user
       TARGET_DB_PASSWORD: target_password
-
+      # API REST de NiFi (HTTPS obligatorio en 2.0)
       NIFI_BASE_URL: https://nifi:8443/nifi-api
       MIGRATION_CONFIG_PATH: /app/configs/migration-demo.yaml
     networks:
       - topomigrator-net
 
+  # BD origen — accesible desde el host en localhost:5433
   postgres-source:
-    image: postgres:16.8
+    image: postgres:18.3
     container_name: postgres-source
     environment:
       POSTGRES_DB: source_db
@@ -39,17 +48,18 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - postgres_source_data:/var/lib/postgresql/data
+      - ./BBDD/volumeOri:/var/lib/postgresql/data # Datos persistidos en carpeta local
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U source_user -d source_db"]
+      test: [ "CMD-SHELL", "pg_isready -U source_user -d source_db" ]
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
       - topomigrator-net
 
+  # BD destino — accesible desde el host en localhost:5434
   postgres-target:
-    image: postgres:16.8
+    image: postgres:18.3
     container_name: postgres-target
     environment:
       POSTGRES_DB: target_db
@@ -58,15 +68,16 @@ services:
     ports:
       - "5434:5432"
     volumes:
-      - postgres_target_data:/var/lib/postgresql/data
+      - ./BBDD/volumeDes:/var/lib/postgresql/data # Datos persistidos en carpeta local
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U target_user -d target_db"]
+      test: [ "CMD-SHELL", "pg_isready -U target_user -d target_db" ]
       interval: 5s
       timeout: 5s
       retries: 5
     networks:
       - topomigrator-net
 
+  # Apache NiFi 2.0 — UI en https://localhost:8443/nifi (admin / Admin123456!!)
   nifi:
     image: apache/nifi:2.0.0
     container_name: nifi
@@ -79,10 +90,7 @@ services:
     networks:
       - topomigrator-net
 
-volumes:
-  postgres_source_data:
-  postgres_target_data:
-
+# Red interna — los servicios se comunican por nombre (ej: postgres-source:5432)
 networks:
   topomigrator-net:
     driver: bridge
