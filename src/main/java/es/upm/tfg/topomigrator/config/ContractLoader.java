@@ -44,7 +44,7 @@ public class ContractLoader {
 
             // Resolver usuario de ejecución si utiliza la variable de entorno
             if (contract.getMigration() != null) {
-                String execUser = contract.getMigration().getExecutionUser();
+                String execUser = contract.getMigration().getAuthor();
                 if ("${USERNAME}".equals(execUser) || "${USER}".equals(execUser)) {
                     String sysUser = System.getProperty("user.name");
                     if (sysUser == null || sysUser.trim().isEmpty()) {
@@ -53,8 +53,9 @@ public class ContractLoader {
                     if (sysUser == null || sysUser.trim().isEmpty()) {
                         sysUser = System.getenv("USER"); // Linux/Unix
                     }
-                    contract.getMigration().setExecutionUser(sysUser != null ? sysUser : "unknown_user");
-                    log.info("Usuario de ejecución dinámico evaluado a: {}", contract.getMigration().getExecutionUser());
+                    contract.getMigration().setAuthor(sysUser != null ? sysUser : "unknown_user");
+                    log.info("Usuario de ejecución dinámico evaluado a: {}",
+                            contract.getMigration().getAuthor());
                 }
             }
 
