@@ -9,6 +9,7 @@ public class MigrationInfo {
     private String description;
     private String version;
     private String author;
+    private String executionUser;
 
     public String getName() {
         return name;
@@ -42,8 +43,16 @@ public class MigrationInfo {
         this.author = author;
     }
 
+    public String getExecutionUser() {
+        return executionUser;
+    }
+
+    public void setExecutionUser(String executionUser) {
+        this.executionUser = executionUser;
+    }
+
     @Override
     public String toString() {
-        return "MigrationInfo{name='" + name + "', version='" + version + "', author='" + author + "'}";
+        return "MigrationInfo{name='" + name + "', version='" + version + "', author='" + author + "', executionUser='" + executionUser + "'}";
     }
 }

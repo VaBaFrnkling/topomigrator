@@ -2,7 +2,7 @@ migration:
   name: migracion_relacional_demo
   description: "Migración de varias tablas entre esquemas..."
   version: 0.1
-  author: nombre_autor
+  author: ${USERNAME}
 
 liquibase:
   changelog: "classpath:/db/changelog/changelog-master.yaml"

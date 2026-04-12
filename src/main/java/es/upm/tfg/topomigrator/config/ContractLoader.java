@@ -42,6 +42,22 @@ public class ContractLoader {
             // Inyectar configuración de base de datos puramente desde variables de entorno
             injectDatabaseConfigurationFromEnv(contract);
 
+            // Resolver usuario de ejecución si utiliza la variable de entorno
+            if (contract.getMigration() != null) {
+                String execUser = contract.getMigration().getExecutionUser();
+                if ("${USERNAME}".equals(execUser) || "${USER}".equals(execUser)) {
+                    String sysUser = System.getProperty("user.name");
+                    if (sysUser == null || sysUser.trim().isEmpty()) {
+                        sysUser = System.getenv("USERNAME"); // Windows
+                    }
+                    if (sysUser == null || sysUser.trim().isEmpty()) {
+                        sysUser = System.getenv("USER"); // Linux/Unix
+                    }
+                    contract.getMigration().setExecutionUser(sysUser != null ? sysUser : "unknown_user");
+                    log.info("Usuario de ejecución dinámico evaluado a: {}", contract.getMigration().getExecutionUser());
+                }
+            }
+
             log.info("Contrato cargado y unificado con entorno: {} (v{})",
                     contract.getMigration().getName(),
                     contract.getMigration().getVersion());
