@@ -80,6 +80,6 @@ public class ContractLoader {
 
         // Se lo inyectamos al contrato
         contract.setDatabase(dbConfig);
-        log.info("Configuración de base de datos inyectada 100% desde variables de entorno.");
+        log.info("Configuración de base de datos inyectada desde variables de entorno.");
     }
 }

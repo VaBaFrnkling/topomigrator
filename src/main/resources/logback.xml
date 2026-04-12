@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!-- Appender para sacar los logs (trazas) por la consola -->
+    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <!-- Aquí configuramos EXACTAMENTE qué sale en cada traza.
+                 %d{yyyy-MM-dd HH:mm:ss} = La fecha y hora exacta
+                 %-5level                 = El nivel (INFO, DEBUG, ERROR...)
+                 %logger{36}              = La clase Java que lanza el log
+                 %msg                     = El mensaje que hemos puesto en el código
+                 %n                       = Salto de línea
+            -->
+            <pattern>%d{yyyy-MM-dd HH:mm:ss} [%-5level] %logger{36} - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <!-- Nivel de log por defecto para toda la aplicación -->
+    <root level="INFO">
+        <appender-ref ref="STDOUT" />
+    </root>
+
+</configuration>
