@@ -7,6 +7,7 @@ public class DatabaseConfig {
 
     private ConnectionConfig sourceConnection;
     private ConnectionConfig targetConnection;
+    private ConnectionConfig metadataConnection;
 
     public ConnectionConfig getSourceConnection() {
         return sourceConnection;
@@ -22,5 +23,13 @@ public class DatabaseConfig {
 
     public void setTargetConnection(ConnectionConfig targetConnection) {
         this.targetConnection = targetConnection;
+    }
+
+    public ConnectionConfig getMetadataConnection() {
+        return metadataConnection;
+    }
+
+    public void setMetadataConnection(ConnectionConfig metadataConnection) {
+        this.metadataConnection = metadataConnection;
     }
 }

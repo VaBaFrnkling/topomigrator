@@ -95,6 +95,14 @@ public class ContractLoader {
         target.setPassword(System.getenv("TARGET_DB_PASSWORD"));
         dbConfig.setTargetConnection(target);
 
+        // --- Conexión Metadatos ---
+        ConnectionConfig metadata = new ConnectionConfig();
+        metadata.setDriver("org.postgresql.Driver"); // Valor asumido por defecto
+        metadata.setJdbcUrl(System.getenv("METADATA_DB_URL"));
+        metadata.setUsername(System.getenv("METADATA_DB_USER"));
+        metadata.setPassword(System.getenv("METADATA_DB_PASSWORD"));
+        dbConfig.setMetadataConnection(metadata);
+
         // Se lo inyectamos al contrato
         contract.setDatabase(dbConfig);
         log.info("Configuración de base de datos inyectada desde variables de entorno.");
