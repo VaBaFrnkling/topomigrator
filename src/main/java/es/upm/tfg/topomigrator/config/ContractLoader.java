@@ -58,6 +58,9 @@ public class ContractLoader {
                             contract.getMigration().getAuthor());
                 }
             }
+            
+            // Validar la integridad y los campos mínimos del contrato
+            es.upm.tfg.topomigrator.validations.ContractValidator.validate(contract, contractPath);
 
             log.info("Contrato cargado y unificado con entorno: {} (v{})",
                     contract.getMigration().getName(),
