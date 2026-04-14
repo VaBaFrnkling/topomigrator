@@ -103,9 +103,9 @@ services:
     networks:
       - topomigrator-net
 
-  # Apache NiFi 2.0 — UI en https://localhost:8443/nifi (admin / Admin123456!!)
+  # Apache NiFi 2.x — UI en https://localhost:8443/nifi (admin / Admin123456!!)
   nifi:
-    image: apache/nifi:2.0.0
+    image: apache/nifi:2.9.0
     container_name: nifi
     environment:
       NIFI_WEB_HTTPS_PORT: 8443
