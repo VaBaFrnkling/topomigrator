@@ -113,6 +113,8 @@ services:
       SINGLE_USER_CREDENTIALS_PASSWORD: Admin123456!!
     ports:
       - "8443:8443"
+    volumes:
+      - ./src/main/resources/db/drivers:/opt/nifi/drivers
     networks:
       - topomigrator-net
 
