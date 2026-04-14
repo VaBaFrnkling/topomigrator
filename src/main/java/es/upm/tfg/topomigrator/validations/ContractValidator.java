@@ -23,6 +23,15 @@ public class ContractValidator {
     
     private static final Logger log = LoggerFactory.getLogger(ContractValidator.class);
 
+    /**
+     * Punto de entrada principal para la validación de un contrato de migración.
+     * Invoca secuencialmente las validaciones de orden de secciones, información
+     * de la migración y la configuración detallada de las tablas.
+     *
+     * @param contract     El objeto MigrationContract parseado a partir del YAML.
+     * @param contractPath La ruta física del archivo contract.yaml analizado.
+     * @throws InvalidContractException Si alguna de las reglas de validación estricta falla.
+     */
     public static void validate(MigrationContract contract, Path contractPath) {
         if (contract == null) {
             throw new InvalidContractException("El contrato proporcionado es nulo.");
@@ -37,6 +46,13 @@ public class ContractValidator {
         log.info("Validación del contrato completada con éxito.");
     }
 
+    /**
+     * Comprueba el orden físico de las secciones raíz dentro del archivo original.
+     * Para garantizar la consistencia, exige que 'migration' preceda a 'liquibase',
+     * y ambos (de estar presentes) deben ir obligatoriamente antes de 'tables'.
+     *
+     * @param originalFile La ruta del fichero YAML para ser leído en texto plano.
+     */
     private static void validateSectionOrder(Path originalFile) {
         try {
             List<String> lines = Files.readAllLines(originalFile);
@@ -64,6 +80,12 @@ public class ContractValidator {
         }
     }
 
+    /**
+     * Verifica que la sección obligatoria 'migration' exista y cuente con
+     * sus propiedades fundamentales ('name' y 'version') debidamente rellenadas.
+     *
+     * @param contract El contrato de migración bajo evaluación.
+     */
     private static void validateMigrationSection(MigrationContract contract) {
         if (contract.getMigration() == null) {
             throw new InvalidContractException("Falta la sección obligatoria 'migration' en el contrato.");
@@ -78,6 +100,14 @@ public class ContractValidator {
         }
     }
 
+    /**
+     * Recorre cada una de las tablas definidas asegurando la integridad
+     * de sus identificadores, referencias de esquemas origen/destino ('source' y 'target')
+     * y la coherencia de sus tipos de migración ('incremental', 'full').
+     * Por último, delega en subvalidaciones en caso de encontrarse configuraciones extra.
+     *
+     * @param contract El contrato global cuyo mapa de tablas será analizado.
+     */
     private static void validateTablesSection(MigrationContract contract) {
         if (contract.getTables() == null || contract.getTables().isEmpty()) {
             throw new InvalidContractException("El contrato debe tener al menos una tabla definida en la sección 'tables'.");
@@ -110,7 +140,12 @@ public class ContractValidator {
                 throw new InvalidContractException("El tipo de migración 'migrationType' no está definido para la estructura '" + tableName + "'.");
             }
             
-            if ("incremental".equalsIgnoreCase(migType.trim()) && tableDef.getIncrementalConfig() == null) {
+            String normalizedMigType = migType.trim().toLowerCase();
+            if (!normalizedMigType.equals("full") && !normalizedMigType.equals("incremental")) {
+                throw new InvalidContractException("Valor no permitido en 'migrationType' para la tabla '" + tableName + "'. Valores permitidos: 'full', 'incremental'.");
+            }
+            
+            if ("incremental".equals(normalizedMigType) && tableDef.getIncrementalConfig() == null) {
                 throw new InvalidContractException("El tipo de migración es 'incremental' pero falta el bloque 'incrementalConfig' en '" + tableName + "'.");
             }
 
@@ -122,6 +157,14 @@ public class ContractValidator {
         }
     }
 
+    /**
+     * Inspecciona a fondo el segmento de transformaciones ('transformations') de una tabla 
+     * específica. Exige que si se declara, contenga al menos una regla operable por columna 
+     * y restringe literales estáticos (como permitir solo 'uppercase' o 'lowercase' en caseTransform).
+     *
+     * @param tableName       El identificador de la tabla siendo analizada.
+     * @param transformations El nodo de configuración de transformaciones a certificar.
+     */
     private static void validateTransformations(String tableName, TransformationConfig transformations) {
         if (transformations != null) {
             if (transformations.getColumns() == null || transformations.getColumns().isEmpty()) {
@@ -151,6 +194,14 @@ public class ContractValidator {
         }
     }
 
+    /**
+     * Evalúa el nodo de auditorías ('validations') para asegurar que contenga lógica de negocio.
+     * Demanda la existencia de al menos comprobaciones globales (conteo de filas, claves foráneas) 
+     * o, como mínimo, restricciones transaccionales aplicadas a nivel de columna (notNull/unique).
+     *
+     * @param tableName   El identificador de la tabla analizada.
+     * @param validations El sumario de requerimientos de validación de los datos migrados.
+     */
     private static void validateValidations(String tableName, ValidationConfig validations) {
         if (validations != null) {
             boolean hasGlobalCheck = (validations.getRowCountCheck() != null) || (validations.getForeignKeyChecks() != null);

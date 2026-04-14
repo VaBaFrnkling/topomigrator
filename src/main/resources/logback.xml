@@ -1,23 +1,59 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <configuration>
 
-    <!-- Appender para sacar los logs (trazas) por la consola -->
+    <!-- ================= PROPIEDADES ================= -->
+    <property name="LOG_PATTERN" value="%d{yyyy-MM-dd HH:mm:ss} [%-5level] %logger{36} - %msg%n" />
+    
+    <!-- Rutas alineadas a la estructura oficial del proyecto en /outputs -->
+    <property name="LOGS_FOLDER" value="outputs/logs" />
+    <property name="ERRORS_FOLDER" value="outputs/errors" />
+
+    <!-- ================= 1. CONSOLA ================= -->
     <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>
-            <!-- Aquí configuramos EXACTAMENTE qué sale en cada traza.
-                 %d{yyyy-MM-dd HH:mm:ss} = La fecha y hora exacta
-                 %-5level                 = El nivel (INFO, DEBUG, ERROR...)
-                 %logger{36}              = La clase Java que lanza el log
-                 %msg                     = El mensaje que hemos puesto en el código
-                 %n                       = Salto de línea
-            -->
-            <pattern>%d{yyyy-MM-dd HH:mm:ss} [%-5level] %logger{36} - %msg%n</pattern>
+            <pattern>${LOG_PATTERN}</pattern>
         </encoder>
     </appender>
 
-    <!-- Nivel de log por defecto para toda la aplicación -->
+    <!-- ================= 2. FICHERO GLOBAL ================= -->
+    <appender name="FILE_ALL" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${LOGS_FOLDER}/application.log</file>
+        
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${LOGS_FOLDER}/application-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ================= 3. FICHERO SOLO PARA ERRORES ================= -->
+    <appender name="FILE_ERROR" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${ERRORS_FOLDER}/error.log</file>
+        
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${ERRORS_FOLDER}/error-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+        
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>ERROR</level>
+            <onMatch>ACCEPT</onMatch>
+            <onMismatch>DENY</onMismatch>
+        </filter>
+        
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+        </encoder>
+    </appender>
+
+    <!-- ================= ENRUTAMIENTO (ROOT) ================= -->
     <root level="INFO">
         <appender-ref ref="STDOUT" />
+        <appender-ref ref="FILE_ALL" />
+        <appender-ref ref="FILE_ERROR" />
     </root>
 
 </configuration>
