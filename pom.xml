@@ -56,13 +56,6 @@
       <version>1.5.6</version>
     </dependency>
 
-    <!-- Motor de control de versiones de bases de datos Liquibase:
-         permite ejecutar los scripts de changelog para crear esquemas de metadatos -->
-    <dependency>
-      <groupId>org.liquibase</groupId>
-      <artifactId>liquibase-core</artifactId>
-      <version>4.27.0</version>
-    </dependency>
 
     <!-- Framework de testing JUnit: permite escribir y ejecutar tests unitarios
          para verificar el correcto funcionamiento de los componentes del migrador -->

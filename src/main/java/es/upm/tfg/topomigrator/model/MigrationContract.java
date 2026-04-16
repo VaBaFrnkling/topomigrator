@@ -9,7 +9,7 @@ public class MigrationContract {
 
     private MigrationInfo migration;
     private DatabaseConfig database;
-    private LiquibaseConfig liquibase;
+
     private Map<String, TableMigration> tables;
 
     public MigrationInfo getMigration() {
@@ -26,14 +26,6 @@ public class MigrationContract {
 
     public void setDatabase(DatabaseConfig database) {
         this.database = database;
-    }
-
-    public LiquibaseConfig getLiquibase() {
-        return liquibase;
-    }
-
-    public void setLiquibase(LiquibaseConfig liquibase) {
-        this.liquibase = liquibase;
     }
 
     public Map<String, TableMigration> getTables() {

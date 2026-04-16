@@ -48,31 +48,24 @@ public class ContractValidator {
 
     /**
      * Comprueba el orden físico de las secciones raíz dentro del archivo original.
-     * Para garantizar la consistencia, exige que 'migration' preceda a 'liquibase',
-     * y ambos (de estar presentes) deben ir obligatoriamente antes de 'tables'.
+     * Para garantizar la consistencia, exige que 'migration' 
+     * debe ir obligatoriamente antes de 'tables'.
      *
      * @param originalFile La ruta del fichero YAML para ser leído en texto plano.
      */
     private static void validateSectionOrder(Path originalFile) {
         try {
             List<String> lines = Files.readAllLines(originalFile);
-            int migrationIdx = -1, liquibaseIdx = -1, tablesIdx = -1;
+            int migrationIdx = -1, tablesIdx = -1;
             
             for (int i = 0; i < lines.size(); i++) {
                 String line = lines.get(i).trim();
                 if (line.startsWith("migration:")) migrationIdx = i;
-                else if (line.startsWith("liquibase:")) liquibaseIdx = i;
                 else if (line.startsWith("tables:")) tablesIdx = i;
             }
 
-            if (migrationIdx != -1 && liquibaseIdx != -1 && migrationIdx > liquibaseIdx) {
-                throw new InvalidContractException("El orden del contrato es incorrecto: 'migration' debe ir antes que 'liquibase'.");
-            }
             if (migrationIdx != -1 && tablesIdx != -1 && migrationIdx > tablesIdx) {
                 throw new InvalidContractException("El orden del contrato es incorrecto: 'migration' debe ir antes de 'tables'.");
-            }
-            if (liquibaseIdx != -1 && tablesIdx != -1 && liquibaseIdx > tablesIdx) {
-                throw new InvalidContractException("El orden del contrato es incorrecto: 'liquibase' debe ir antes de 'tables'.");
             }
 
         } catch (IOException e) {

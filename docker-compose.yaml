@@ -14,14 +14,11 @@ services:
         condition: service_healthy
       postgres-target:
         condition: service_healthy
-      postgres-metadata:
-        condition: service_healthy
       nifi:
         condition: service_started
     # Carpetas compartidas entre el host y el contenedor
     volumes:
       - ./configs:/app/configs # Configuración de entrada
-      - ./changelogs:/app/changelogs # Changelogs Liquibase generados
       - ./flows:/app/flows # Flows NiFi generados
       - ./outputs:/app/outputs # Logs, errores y trazas
     environment:
@@ -33,10 +30,6 @@ services:
       TARGET_DB_URL: jdbc:postgresql://postgres-target:5432/target_db
       TARGET_DB_USER: target_user
       TARGET_DB_PASSWORD: target_password
-      # Conexión BD metadatos
-      METADATA_DB_URL: jdbc:postgresql://postgres-metadata:5432/metadata_db
-      METADATA_DB_USER: metadata_user
-      METADATA_DB_PASSWORD: metadata_password
       # API REST de NiFi (HTTPS obligatorio en 2.0)
       NIFI_BASE_URL: https://nifi:8443/nifi-api
       MIGRATION_CONFIG_PATH: /app/configs/migration-demo.yaml
@@ -77,26 +70,6 @@ services:
       - ./BBDD/volumeDes:/var/lib/postgresql/data # Datos persistidos en carpeta local
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U target_user -d target_db" ]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - topomigrator-net
-
-  # BD metadatos — accesible desde el host en localhost:5435 para almacenar los metadatos de las tablas
-  postgres-metadata:
-    image: postgres:18.3
-    container_name: postgres-metadata
-    environment:
-      POSTGRES_DB: metadata_db
-      POSTGRES_USER: metadata_user
-      POSTGRES_PASSWORD: metadata_password
-    ports:
-      - "5435:5432"
-    volumes:
-      - ./BBDD/volumeMeta:/var/lib/postgresql/data # Datos persistidos en carpeta local
-    healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U metadata_user -d metadata_db" ]
       interval: 5s
       timeout: 5s
       retries: 5
