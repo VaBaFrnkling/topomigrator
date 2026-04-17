@@ -8,6 +8,7 @@ import es.upm.tfg.topomigrator.orchestration.dependency.MetadataDependencyExtrac
 import es.upm.tfg.topomigrator.orchestration.dependency.TableNode;
 import es.upm.tfg.topomigrator.execution.ExecutionEngine;
 import es.upm.tfg.topomigrator.util.DatabaseConnectionManager;
+import es.upm.tfg.topomigrator.util.OutputCleaner;
 import es.upm.tfg.topomigrator.execution.LiquibaseSchemaExecutor;
 import es.upm.tfg.topomigrator.validations.SchemaCompatibilityValidator;
 import es.upm.tfg.topomigrator.validations.TargetChangelogValidator;
@@ -24,6 +25,9 @@ public class App {
 
     public static void main(String[] args) {
         logger.info("Iniciando orquestador TopoMigrator...");
+        
+        // 0. Purgar rastros y reportes de ejecuciones previas (Clean Slate)
+        OutputCleaner.cleanOutputs();
         
         try {
             // 1. Cargar el contrato

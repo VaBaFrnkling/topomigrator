@@ -138,8 +138,9 @@ public class NiFiClient {
      * @param groupName El nombre del nuevo Process Group
      * @param positionY Coordenada para que no colapsen visualmente
      * @param flowJsonPath La ruta al fichero con el JSON Template (flujo)
+     * @param dynamicVariables Mapa clave-valor (ej: "##TABLA_ORIGEN##" -> "clientes") a incrustar
      */
-    public String uploadFlowDefinition(String parentId, String groupName, int positionY, Path flowJsonPath) throws Exception {
+    public String uploadFlowDefinition(String parentId, String groupName, int positionY, Path flowJsonPath, java.util.Map<String, String> dynamicVariables) throws Exception {
         if (jwtToken == null) {
             throw new IllegalStateException("Cliente no autenticado.");
         }
@@ -149,6 +150,13 @@ public class NiFiClient {
 
         byte[] fileBytes = Files.readAllBytes(flowJsonPath);
         String fileContent = new String(fileBytes, StandardCharsets.UTF_8);
+
+        // Parametrización en caliente: Buscamos e insertamos los tokens dinámicos de cada tabla
+        if (dynamicVariables != null) {
+            for (java.util.Map.Entry<String, String> entry : dynamicVariables.entrySet()) {
+                fileContent = fileContent.replace(entry.getKey(), entry.getValue());
+            }
+        }
 
         StringBuilder sb = new StringBuilder();
 
@@ -187,10 +195,57 @@ public class NiFiClient {
 
         if (response.statusCode() == 201 || response.statusCode() == 200) {
              logger.info("Flujo cargado exitosamente para el Process Group: {}", groupName);
-             return response.body();
+             JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
+             return root.getAsJsonObject("processGroup").get("id").getAsString();
         } else {
              logger.error("Error al cargar el flujo {}: Status {} - {}", groupName, response.statusCode(), response.body());
              throw new RuntimeException("No se pudo cargar el JSON del flujo de NiFi. Status: " + response.statusCode());
+        }
+    }
+
+    /**
+     * Inicia o detiene los procesadores dentro de un Process Group.
+     * @param processGroupId El ID del grupo subido.
+     * @param state "RUNNING" o "STOPPED"
+     */
+    public void changeProcessGroupState(String processGroupId, String state) throws Exception {
+        if (jwtToken == null) throw new IllegalStateException("Cliente no autenticado.");
+
+        String jsonBody = "{\"id\":\"" + processGroupId + "\",\"state\":\"" + state + "\"}";
+        
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/flow/process-groups/" + processGroupId))
+                .header("Authorization", "Bearer " + jwtToken)
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(jsonBody))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            logger.error("No se pudo cambiar el estado a {} del grupo {}. HTTP {}", state, processGroupId, response.statusCode());
+            throw new RuntimeException("Error al arrancar/detener NiFi Group: " + response.statusCode());
+        }
+    }
+
+    /**
+     * Obtiene las métricas en crudo del Process Group (bytes read, records, threads).
+     */
+    public JsonObject getProcessGroupStatus(String processGroupId) throws Exception {
+        if (jwtToken == null) throw new IllegalStateException("Cliente no autenticado.");
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/flow/process-groups/" + processGroupId + "/status"))
+                .header("Authorization", "Bearer " + jwtToken)
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() == 200) {
+            return JsonParser.parseString(response.body()).getAsJsonObject();
+        } else {
+            logger.error("Error al obtener status de NiFi para el grupo {}. HTTP {}", processGroupId, response.statusCode());
+            throw new RuntimeException("Error consultando métricas: " + response.statusCode());
         }
     }
 }
