@@ -21,6 +21,7 @@ services:
       - ./configs:/app/configs # Configuración de entrada
       - ./flows:/app/flows # Flows NiFi generados
       - ./outputs:/app/outputs # Logs, errores y trazas
+      - ./changelogs:/app/changelogs # Scripts DDL de los esquemas destino
     environment:
       # Conexión BD origen
       SOURCE_DB_URL: jdbc:postgresql://postgres-source:5432/source_db
@@ -34,7 +35,7 @@ services:
       NIFI_BASE_URL: https://nifi:8443/nifi-api
       NIFI_USERNAME: admin
       NIFI_PASSWORD: Admin123456!!
-      MIGRATION_CONFIG_PATH: /app/configs/migration-demo.yaml
+      MIGRATION_CONFIG_PATH: /app/configs/contract.yaml
     networks:
       - topomigrator-net
 

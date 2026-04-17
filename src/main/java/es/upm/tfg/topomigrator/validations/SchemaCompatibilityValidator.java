@@ -24,19 +24,46 @@ public class SchemaCompatibilityValidator {
     private static final Logger log = LoggerFactory.getLogger(SchemaCompatibilityValidator.class);
 
     /**
-     * Valida la compatibilidad de los esquemas origen y destino definidos en el contrato.
-     * Conecta a ambas bases de datos y verifica que las tablas existan y las columnas de origen
-     * tengan su correspondencia en destino (teniendo en cuenta transformaciones de renombrado).
+     * Valida ÚNICAMENTE la existencia y accesibilidad de las tablas de Origen.
+     * Esto permite detectar fallos preventivos antes de desplegar nada en el Destino.
      *
-     * @param contract El contrato de migración con la configuración de BD y tablas.
-     * @throws SchemaCompatibilityException Si las tablas no existen o los esquemas son incompatibles.
+     * @param contract El contrato de migración.
      */
-    public static void validateCompatibility(MigrationContract contract) {
-        log.info("Iniciando validación de compatibilidad de esquemas (origen vs destino).");
+    public static void validateSourceSchemas(MigrationContract contract) {
+        log.info("Iniciando validación pre-migración: Comprobando Base de Datos Origen.");
 
         if (contract == null || contract.getTables() == null) {
             throw new SchemaCompatibilityException("El contrato o las tablas están vacíos.");
         }
+
+        try (Connection sourceConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection())) {
+            DatabaseMetaData sourceMeta = sourceConn.getMetaData();
+
+            for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
+                String sourceSchema = entry.getValue().getSource().getSchema();
+                String sourceTable = entry.getValue().getSource().getTable();
+
+                Map<String, String> sourceColumns = getColumns(sourceMeta, sourceSchema, sourceTable);
+                if (sourceColumns.isEmpty()) {
+                    throw new SchemaCompatibilityException(
+                            String.format("La tabla origen '%s' no existe o no se detectaron columnas accesibles.", formatTableName(sourceSchema, sourceTable))
+                    );
+                }
+            }
+        } catch (SQLException e) {
+            throw new SchemaCompatibilityException("Error JDBC al conectar a la Base de Datos de Origen.", e);
+        }
+        log.info("Todas las tablas origen configuradas existen y son accesibles.");
+    }
+
+    /**
+     * Valida que las tablas Destino contengan el mapeo de columnas exacto de las Origen.
+     * Se debe invocar DESPUÉS de que Liquibase haya generado las estructuras destino.
+     *
+     * @param contract El contrato de migración.
+     */
+    public static void validateTargetAndMapping(MigrationContract contract) {
+        log.info("Iniciando validación post-despliegue: Mapeo de esquemas Origen vs Destino.");
 
         try (Connection sourceConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection());
              Connection targetConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getTargetConnection())) {
@@ -48,26 +75,17 @@ public class SchemaCompatibilityValidator {
                 String tableNameId = entry.getKey();
                 TableMigration tableDef = entry.getValue();
 
-                log.info("Validando compatibilidad para la definición de tabla: {}", tableNameId);
-
                 String sourceSchema = tableDef.getSource().getSchema();
                 String sourceTable = tableDef.getSource().getTable();
                 String targetSchema = tableDef.getTarget().getSchema();
                 String targetTable = tableDef.getTarget().getTable();
 
-                // Validar la existencia de la tabla origen y extraer sus columnas
                 Map<String, String> sourceColumns = getColumns(sourceMeta, sourceSchema, sourceTable);
-                if (sourceColumns.isEmpty()) {
-                    throw new SchemaCompatibilityException(
-                            String.format("La tabla origen '%s' no existe o no tiene columnas accesibles.", formatTableName(sourceSchema, sourceTable))
-                    );
-                }
-
-                // Validar la existencia de la tabla destino y extraer sus columnas
                 Map<String, String> targetColumns = getColumns(targetMeta, targetSchema, targetTable);
+
                 if (targetColumns.isEmpty()) {
                     throw new SchemaCompatibilityException(
-                            String.format("La tabla destino '%s' no existe o no tiene columnas accesibles.", formatTableName(targetSchema, targetTable))
+                            String.format("La tabla destino '%s' no ha sido creada por Liquibase o no es accesible.", formatTableName(targetSchema, targetTable))
                     );
                 }
 
@@ -76,15 +94,9 @@ public class SchemaCompatibilityValidator {
             }
 
         } catch (SQLException e) {
-            throw new SchemaCompatibilityException("Error al conectar a las bases de datos para comprobar compatibilidad.", e);
-        } catch (Exception e) {
-            if (e instanceof SchemaCompatibilityException) {
-                throw e; // Relanzar excepciones específicas
-            }
-            throw new SchemaCompatibilityException("Fallo inesperado al realizar la comprobación de compatibilidad de esquema.", e);
+            throw new SchemaCompatibilityException("Error al conectar a las bases de datos para comprobar mapeo.", e);
         }
-
-        log.info("Validación de compatibilidad completada con éxito. Las tablas son compatibles.");
+        log.info("Validación de compatibilidad de esquemas (Origen vs Destino) completada con éxito.");
     }
 
     /**
@@ -96,8 +108,8 @@ public class SchemaCompatibilityValidator {
 
             if (!targetColumns.containsKey(expectedTargetCol.toLowerCase())) {
                 throw new SchemaCompatibilityException(
-                        String.format("La columna origen '%s' (mapeada a '%s') no existe en la tabla destino de la migración '%s'.", 
-                        sourceCol, expectedTargetCol, tableNameId)
+                        String.format("La columna origen '%s' (mapeada a '%s') no existe en la tabla destino tras generar su esquema.", 
+                        sourceCol, expectedTargetCol)
                 );
             }
         }
@@ -122,21 +134,17 @@ public class SchemaCompatibilityValidator {
 
     /**
      * Extrae las columnas de una tabla dada utilizando la metadata JDBC.
-     * Soporta tablas en mayúsculas y minúsculas para abstraer detalles
-     * de diferentes motores relacionales (Oracle vs Postgres, etc.).
      */
     private static Map<String, String> getColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
         Map<String, String> columns = new HashMap<>();
         String schemaPattern = (schema != null && !schema.trim().isEmpty()) ? schema : null;
         
-        // 1. Intentar con el nombre tal cual
         try (ResultSet rs = metaData.getColumns(null, schemaPattern, table, null)) {
             while (rs.next()) {
                 columns.put(rs.getString("COLUMN_NAME").toLowerCase(), rs.getString("TYPE_NAME"));
             }
         }
         
-        // 2. Intentar con UPPERCASE (típico en Oracle o H2 sin comillas)
         if (columns.isEmpty()) {
             String upperSchema = (schemaPattern != null) ? schemaPattern.toUpperCase() : null;
             try (ResultSet rs = metaData.getColumns(null, upperSchema, table.toUpperCase(), null)) {
@@ -146,7 +154,6 @@ public class SchemaCompatibilityValidator {
             }
         }
         
-        // 3. Intentar con LOWERCASE (típico en PostgreSQL)
         if (columns.isEmpty()) {
             String lowerSchema = (schemaPattern != null) ? schemaPattern.toLowerCase() : null;
             try (ResultSet rs = metaData.getColumns(null, lowerSchema, table.toLowerCase(), null)) {

@@ -57,7 +57,7 @@ COPY --from=build /app/target/topomigrator-1.0-SNAPSHOT.jar app.jar
 #   configs/                → Ficheros de configuración de entrada (ej: Contrato.yaml)
 #   flows/full/             → Flows de NiFi generados para migración completa
 #   flows/incremental/      → Flows de NiFi generados para migración incremental
-#   changelogs/tables/      → Changelogs de Liquibase generados por tabla
+#   changelogs/tables/      → Changelogs generados por tabla para el destino
 #   outputs/errors/         → Registro de errores ocurridos durante la migración
 #   outputs/logs/           → Logs generales de ejecución de la aplicación
 #   outputs/traces/         → Trazas de auditoría y trazabilidad de la migración

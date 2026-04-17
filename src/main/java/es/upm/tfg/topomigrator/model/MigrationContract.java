@@ -9,7 +9,6 @@ public class MigrationContract {
 
     private MigrationInfo migration;
     private DatabaseConfig database;
-    private LiquibaseConfig liquibase;
 
     private Map<String, TableMigration> tables;
 
@@ -29,13 +28,6 @@ public class MigrationContract {
         this.database = database;
     }
 
-    public LiquibaseConfig getLiquibase() {
-        return liquibase;
-    }
-
-    public void setLiquibase(LiquibaseConfig liquibase) {
-        this.liquibase = liquibase;
-    }
 
     public Map<String, TableMigration> getTables() {
         return tables;
@@ -47,7 +39,7 @@ public class MigrationContract {
 
     @Override
     public String toString() {
-        return "MigrationContract{migration=" + migration + ", liquibase=" + liquibase + ", tables=" + (tables != null ? tables.keySet() : "[]")
+        return "MigrationContract{migration=" + migration + ", tables=" + (tables != null ? tables.keySet() : "[]")
                 + "}";
     }
 }

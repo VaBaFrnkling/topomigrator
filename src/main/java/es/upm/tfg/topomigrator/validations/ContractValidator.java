@@ -39,7 +39,6 @@ public class ContractValidator {
 
         validateSectionOrder(contractPath);
         validateMigrationSection(contract);
-        validateLiquibaseSection(contract);
         validateTablesSection(contract);
         
         log.info("Validación del contrato completada con éxito.");
@@ -92,21 +91,6 @@ public class ContractValidator {
         }
     }
 
-    /**
-     * Verifica que la sección obligatoria 'liquibase' exista y cuente con
-     * sus propiedades.
-     *
-     * @param contract El contrato de migración bajo evaluación.
-     */
-    private static void validateLiquibaseSection(MigrationContract contract) {
-        if (contract.getLiquibase() == null) {
-            throw new InvalidContractException("Falta la sección obligatoria 'liquibase' en el contrato.");
-        }
-
-        if (contract.getLiquibase().getChangelog() == null || contract.getLiquibase().getChangelog().trim().isEmpty()) {
-            throw new InvalidContractException("El campo 'liquibase.changelog' es obligatorio deviniendo de contract.yaml y no puede estar vacío.");
-        }
-    }
 
     /**
      * Recorre cada una de las tablas definidas asegurando la integridad

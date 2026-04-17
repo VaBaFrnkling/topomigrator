@@ -4,10 +4,6 @@ migration:
   version: 0.1
   author: ${USERNAME}
 
-liquibase:
-  changelog: classpath:/db/changelog/changelog-master.yaml
-  contexts: "production"
-
 tables:
   nombre_tabla_1:
     source:
