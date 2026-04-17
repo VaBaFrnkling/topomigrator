@@ -35,14 +35,27 @@ public class ExecutionEngine {
             nifiClient.authenticate();
             logger.info("Autenticación con Apache NiFi completada con éxito.");
 
+            // Obtener PID del Root y verificar el template
+            String rootId = nifiClient.getRootProcessGroupId();
+            logger.info("ID del Process Group raíz obtenido: {}", rootId);
+
+            java.nio.file.Path flowPath = java.nio.file.Paths.get("flows", "MainMigration.json");
+            if (!java.nio.file.Files.exists(flowPath)) {
+                logger.warn("No se encontró el fichero de flujo en {}, asegúrate de haberlo exportado.", flowPath);
+            }
+
+            int yOffset = 0;
             // Iterar sobre las tablas resueltas y ejecutar/instanciar su flujo
             for (TableNode table : executionOrder) {
-                logger.info(">> Solicitando a NiFi flujo para la tabla: {}", table.getName());
+                logger.info(">> Solicitando despliegue en NiFi para la tabla: {}", table.getName());
                 
-                // TODO: En el futuro instanciar templates de NiFi o configurar Parameter Contexts
-                
-                // Por ahora simulamos la llamada a una API genérica para notificar inicio
-                nifiClient.createProcessGroupParaTabla(table.getName());
+                String groupName = "Migracion_" + table.getName();
+                if (java.nio.file.Files.exists(flowPath)) {
+                    nifiClient.uploadFlowDefinition(rootId, groupName, yOffset, flowPath);
+                    yOffset += 300; // Desplazamiento en el canvas para que no se superpongan visualmente
+                } else {
+                    logger.error("Se simula la creación pero no se ejecutó subida porque falta MainMigration.json");
+                }
             }
 
             logger.info("Despliegue de flujos completado en NiFi.");

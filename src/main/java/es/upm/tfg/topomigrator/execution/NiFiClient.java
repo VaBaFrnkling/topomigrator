@@ -12,8 +12,12 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Duration;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
 /**
  * Cliente REST para comunicarse con la API de Apache NiFi.
@@ -102,18 +106,14 @@ public class NiFiClient {
     }
 
     /**
-     * Simula la creación/activación del flujo (Process Group) para una tabla en concreto.
-     * @param tableName Nombre de la tabla
+     * Obtiene el ID del Process Group raíz (root) del canvas de NiFi.
+     * @return El UUID del process group raíz.
      */
-    public void createProcessGroupParaTabla(String tableName) throws Exception {
+    public String getRootProcessGroupId() throws Exception {
         if (jwtToken == null) {
             throw new IllegalStateException("Cliente no autenticado. LLamar a authenticate() primero.");
         }
 
-        logger.debug("Construyendo payload de invocación para la tabla {}", tableName);
-        // FIXME: Esta request es figurativa; deberíamos obtener el root-group y crear hijos
-        //        Por ahora consultamos y loggear para evitar complejidad asumiendo éxito
-        
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + "/process-groups/root"))
                 .header("Authorization", "Bearer " + jwtToken)
@@ -124,9 +124,73 @@ public class NiFiClient {
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         
         if (response.statusCode() == 200) {
-            logger.info("Respuesta exitosa de NiFi Process Group Root confirmando viabilidad para la tabla '{}'.", tableName);
+            JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
+            return root.getAsJsonObject("component").get("id").getAsString();
         } else {
-            logger.warn("NiFi no respondió exitosamente para tabla {}. API Status: {}", tableName, response.statusCode());
+            logger.error("No se pudo obtener el root process group. Status: {}", response.statusCode());
+            throw new RuntimeException("Error obteniendo PID de root: " + response.statusCode());
+        }
+    }
+
+    /**
+     * Sube un fichero JSON de Flujo NiFi al orchestrador usando el endpoint de upload form-data en versión 2.x
+     * @param parentId El UUID del process group padre donde residirá
+     * @param groupName El nombre del nuevo Process Group
+     * @param positionY Coordenada para que no colapsen visualmente
+     * @param flowJsonPath La ruta al fichero con el JSON Template (flujo)
+     */
+    public String uploadFlowDefinition(String parentId, String groupName, int positionY, Path flowJsonPath) throws Exception {
+        if (jwtToken == null) {
+            throw new IllegalStateException("Cliente no autenticado.");
+        }
+
+        String boundary = "----NiFiFormBoundary" + System.currentTimeMillis();
+        String crlf = "\r\n";
+
+        byte[] fileBytes = Files.readAllBytes(flowJsonPath);
+        String fileContent = new String(fileBytes, StandardCharsets.UTF_8);
+
+        StringBuilder sb = new StringBuilder();
+
+        // Param: groupName
+        sb.append("--").append(boundary).append(crlf);
+        sb.append("Content-Disposition: form-data; name=\"groupName\"").append(crlf).append(crlf);
+        sb.append(groupName).append(crlf);
+
+        // Param: positionX
+        sb.append("--").append(boundary).append(crlf);
+        sb.append("Content-Disposition: form-data; name=\"positionX\"").append(crlf).append(crlf);
+        sb.append("0").append(crlf);
+
+        // Param: positionY
+        sb.append("--").append(boundary).append(crlf);
+        sb.append("Content-Disposition: form-data; name=\"positionY\"").append(crlf).append(crlf);
+        sb.append(positionY).append(crlf);
+
+        // Param: flowDefinition
+        sb.append("--").append(boundary).append(crlf);
+        sb.append("Content-Disposition: form-data; name=\"flowDefinition\"; filename=\"flow.json\"").append(crlf);
+        sb.append("Content-Type: application/json").append(crlf).append(crlf);
+        sb.append(fileContent).append(crlf);
+
+        // Finale
+        sb.append("--").append(boundary).append("--").append(crlf);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/process-groups/" + parentId + "/process-groups/upload"))
+                .header("Authorization", "Bearer " + jwtToken)
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofString(sb.toString()))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() == 201 || response.statusCode() == 200) {
+             logger.info("Flujo cargado exitosamente para el Process Group: {}", groupName);
+             return response.body();
+        } else {
+             logger.error("Error al cargar el flujo {}: Status {} - {}", groupName, response.statusCode(), response.body());
+             throw new RuntimeException("No se pudo cargar el JSON del flujo de NiFi. Status: " + response.statusCode());
         }
     }
 }

@@ -32,6 +32,8 @@ services:
       TARGET_DB_PASSWORD: target_password
       # API REST de NiFi (HTTPS obligatorio en 2.0)
       NIFI_BASE_URL: https://nifi:8443/nifi-api
+      NIFI_USERNAME: admin
+      NIFI_PASSWORD: Admin123456!!
       MIGRATION_CONFIG_PATH: /app/configs/migration-demo.yaml
     networks:
       - topomigrator-net
@@ -88,6 +90,8 @@ services:
       - "8443:8443"
     volumes:
       - ./src/main/resources/db/drivers:/opt/nifi/drivers
+      - ./src/main/resources/nifi-logback.xml:/opt/nifi/nifi-current/conf/logback.xml:ro
+      - ./outputs/logs:/opt/nifi/nifi-current/logs
     networks:
       - topomigrator-net
 
