@@ -4,9 +4,7 @@ import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.exceptions.InvalidContractException;
 import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.model.TransformationConfig;
-import es.upm.tfg.topomigrator.model.ValidationConfig;
 import es.upm.tfg.topomigrator.model.ColumnTransformation;
-import es.upm.tfg.topomigrator.model.ColumnValidation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.Map;
@@ -41,6 +39,7 @@ public class ContractValidator {
 
         validateSectionOrder(contractPath);
         validateMigrationSection(contract);
+        validateLiquibaseSection(contract);
         validateTablesSection(contract);
         
         log.info("Validación del contrato completada con éxito.");
@@ -90,6 +89,22 @@ public class ContractValidator {
         
         if (contract.getMigration().getVersion() == null || contract.getMigration().getVersion().trim().isEmpty()) {
             throw new InvalidContractException("El campo 'migration.version' es obligatorio.");
+        }
+    }
+
+    /**
+     * Verifica que la sección obligatoria 'liquibase' exista y cuente con
+     * sus propiedades.
+     *
+     * @param contract El contrato de migración bajo evaluación.
+     */
+    private static void validateLiquibaseSection(MigrationContract contract) {
+        if (contract.getLiquibase() == null) {
+            throw new InvalidContractException("Falta la sección obligatoria 'liquibase' en el contrato.");
+        }
+
+        if (contract.getLiquibase().getChangelog() == null || contract.getLiquibase().getChangelog().trim().isEmpty()) {
+            throw new InvalidContractException("El campo 'liquibase.changelog' es obligatorio deviniendo de contract.yaml y no puede estar vacío.");
         }
     }
 
@@ -144,9 +159,6 @@ public class ContractValidator {
 
             // Validar transformations
             validateTransformations(tableName, tableDef.getTransformations());
-
-            // Validar validations
-            validateValidations(tableName, tableDef.getValidations());
         }
     }
 
@@ -181,36 +193,6 @@ public class ContractValidator {
                     String caseVal = colDef.getCaseTransform().trim().toLowerCase();
                     if (!caseVal.equals("uppercase") && !caseVal.equals("lowercase")) {
                         throw new InvalidContractException("Valor no permitido en transformaciones '" + colName + "' para 'caseTransform' ('case'). Solo se permite 'uppercase' o 'lowercase'.");
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Evalúa el nodo de auditorías ('validations') para asegurar que contenga lógica de negocio.
-     * Demanda la existencia de al menos comprobaciones globales (conteo de filas, claves foráneas) 
-     * o, como mínimo, restricciones transaccionales aplicadas a nivel de columna (notNull/unique).
-     *
-     * @param tableName   El identificador de la tabla analizada.
-     * @param validations El sumario de requerimientos de validación de los datos migrados.
-     */
-    private static void validateValidations(String tableName, ValidationConfig validations) {
-        if (validations != null) {
-            boolean hasGlobalCheck = (validations.getRowCountCheck() != null) || (validations.getForeignKeyChecks() != null);
-            boolean hasColCheck = (validations.getColumns() != null && !validations.getColumns().isEmpty());
-            
-            if (!hasGlobalCheck && !hasColCheck) {
-                throw new InvalidContractException("La sección de validaciones para la tabla '" + tableName + "' no define ni comprobaciones globales, ni columnas de verificación.");
-            }
-
-            if (validations.getColumns() != null) {
-                for (Map.Entry<String, ColumnValidation> colEntry : validations.getColumns().entrySet()) {
-                    String colName = colEntry.getKey();
-                    ColumnValidation colDef = colEntry.getValue();
-                    
-                    if (colDef == null || (colDef.getNotNull() == null && colDef.getUnique() == null)) {
-                        throw new InvalidContractException("La columna '" + colName + "' de validaciones en '" + tableName + "' no tiene reglas. Debe aplicar al menos algo (notNull, unique).");
                     }
                 }
             }

@@ -12,7 +12,6 @@ public class TableMigration {
     private IncrementalConfig incrementalConfig;
     private FilterConfig filters;
     private TransformationConfig transformations;
-    private ValidationConfig validations;
 
     public TableRef getSource() {
         return source;
@@ -68,14 +67,6 @@ public class TableMigration {
 
     public void setTransformations(TransformationConfig transformations) {
         this.transformations = transformations;
-    }
-
-    public ValidationConfig getValidations() {
-        return validations;
-    }
-
-    public void setValidations(ValidationConfig validations) {
-        this.validations = validations;
     }
 
     @Override

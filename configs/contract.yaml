@@ -4,6 +4,9 @@ migration:
   version: 0.1
   author: ${USERNAME}
 
+liquibase:
+  changelog: classpath:/db/changelog/changelog-master.yaml
+  contexts: "production"
 
 tables:
   nombre_tabla_1:
@@ -16,8 +19,10 @@ tables:
     enabled: true
     migrationType: full
     incrementalConfig:
-      column: nombre_columna
+      column: fecha_creacion
+      type: timestamp
       startValue: "2026-01-01T00:00:00"
+      batchSize: 1000
     filters:
       where: "condicion SQL"
     transformations:
@@ -28,10 +33,3 @@ tables:
           trim: true
           nullDefault: valor
           case: uppercase
-    validations:
-      rowCountCheck: true
-      foreignKeyChecks: true
-      columns:
-        nombre_columna:
-          notNull: true
-          unique: true
