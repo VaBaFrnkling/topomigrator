@@ -29,7 +29,7 @@ public class MetadataDependencyExtractor {
      *                       Puede ser nulo para aplicar la búsqueda global o al esquema predeterminado.
      * @param includedTables Conjunto de nombres de las tablas explícitamente citadas en el `Contrato.yaml`.
      * @return Lista de objetos ForeignKeyDependency que modelan la dirección padre -> dependiente.
-     * @throws SQLException Si ocurre un error de red o al consultar los metadatos de la BBDD.
+     * @throws SQLException Si ocurre un error de red o al consultar los metadatos de la base de datos.
      */
     public List<ForeignKeyDependency> extractDependencies(Connection connection, String schema, Set<String> includedTables) throws SQLException {
         List<ForeignKeyDependency> dependencias = new ArrayList<>();

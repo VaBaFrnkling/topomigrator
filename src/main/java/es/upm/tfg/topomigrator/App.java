@@ -40,6 +40,10 @@ public class App {
             ContractLoader loader = new ContractLoader();
             MigrationContract contract = loader.load(configPath);
 
+            // 1.2. Pruebas de conexión JDBC previas a la migración
+            DatabaseConnectionManager.testConnection(contract.getDatabase().getSourceConnection(), "Base de Datos Origen");
+            DatabaseConnectionManager.testConnection(contract.getDatabase().getTargetConnection(), "Base de Datos Destino");
+
             // 1.5. Validaciones preventivas de Fase 1 (Solo origen)
             SchemaCompatibilityValidator.validateSourceSchemas(contract);
             TargetChangelogValidator.validate(contract);
@@ -50,7 +54,7 @@ public class App {
             // 1.7. Validar el mapeo exacto ahora que el Destino tiene los diseños instalados
             SchemaCompatibilityValidator.validateTargetAndMapping(contract);
 
-            // 2. Conectar a la BBDD de origen para extraer metadatos
+            // 2. Conectar a la base de datos de origen para extraer metadatos
             List<ForeignKeyDependency> dependencies;
             try (Connection sourceConnection = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection())) {
                 MetadataDependencyExtractor extractor = new MetadataDependencyExtractor();

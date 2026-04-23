@@ -1,7 +1,7 @@
 migration:
   name: migracion_relacional_demo
   description: "Migración de varias tablas entre esquemas..."
-  version: 0.1
+  version: "0.1"
   author: ${USERNAME}
 
 tables:
@@ -28,4 +28,4 @@ tables:
           type: tipo_destino
           trim: true
           nullDefault: valor
-          case: uppercase
+          caseTransform: uppercase

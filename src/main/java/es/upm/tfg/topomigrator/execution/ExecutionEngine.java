@@ -1,5 +1,6 @@
 package es.upm.tfg.topomigrator.execution;
 
+import es.upm.tfg.topomigrator.audit.ExecutionIdGenerator;
 import es.upm.tfg.topomigrator.audit.SummaryTrace;
 import es.upm.tfg.topomigrator.audit.TableTrace;
 import es.upm.tfg.topomigrator.audit.Timing;
@@ -38,7 +39,8 @@ public class ExecutionEngine {
         logger.info("Iniciando Motor de Ejecución de Apache NiFi y recolección de Trazas...");
         
         SummaryTrace summary = new SummaryTrace();
-        String executionId = "exec-" + System.currentTimeMillis();
+        ExecutionIdGenerator idGenerator = new ExecutionIdGenerator();
+        String executionId = idGenerator.getExecutionId();
         summary.executionId = executionId;
         
         summary.migration = new SummaryTrace.MigrationInfo();
@@ -79,7 +81,7 @@ public class ExecutionEngine {
                 
                 TableTrace tableTrace = new TableTrace();
                 tableTrace.executionId = executionId;
-                tableTrace.tableExecutionId = executionId + "-t" + orderCounter;
+                tableTrace.tableExecutionId = idGenerator.getTableExecutionId(orderCounter);
                 tableTrace.executionOrder = orderCounter;
                 tableTrace.timing = new Timing();
                 tableTrace.timing.startTime = LocalDateTime.now().format(formatter);
@@ -128,6 +130,14 @@ public class ExecutionEngine {
                     flowConfigVariables.put("##TABLA_DESTINO##", tableTrace.table.target.name);
                     flowConfigVariables.put("##ESQUEMA_DESTINO##", tableTrace.table.target.schema != null ? tableTrace.table.target.schema : "public");
                     
+                    // Inyección de parámetros de conexión JDBC desde datasources.yaml al Parameter Context de NiFi
+                    flowConfigVariables.put("##SOURCE_DB_URL##", contract.getDatabase().getSourceConnection().getJdbcUrl());
+                    flowConfigVariables.put("##SOURCE_DB_USER##", contract.getDatabase().getSourceConnection().getUsername());
+                    flowConfigVariables.put("##SOURCE_DB_PASSWORD##", contract.getDatabase().getSourceConnection().getPassword());
+                    flowConfigVariables.put("##TARGET_DB_URL##", contract.getDatabase().getTargetConnection().getJdbcUrl());
+                    flowConfigVariables.put("##TARGET_DB_USER##", contract.getDatabase().getTargetConnection().getUsername());
+                    flowConfigVariables.put("##TARGET_DB_PASSWORD##", contract.getDatabase().getTargetConnection().getPassword());
+
                     // Inyección paramétrica para lógicas de NiFi Condicionales (Ej: ExecuteSQL dinámico)
                     String migType = tableConfig.getMigrationType() != null ? tableConfig.getMigrationType().toLowerCase() : "full";
                     flowConfigVariables.put("##TIPO_MIGRACION##", migType);

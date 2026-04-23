@@ -4,13 +4,6 @@
         <resetJUL>true</resetJUL>
     </contextListener>
 
-    <!-- Appender para escribir en consola (para ver en docker logs) -->
-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder class="ch.qos.logback.classic.encoder.PatternLayoutEncoder">
-            <pattern>%date %level [%thread] %logger{40} %msg%n</pattern>
-        </encoder>
-    </appender>
-
     <!-- Appender para escribir en el archivo app.log (para ser accedido desde el volumen local) -->
     <appender name="APP_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${org.apache.nifi.bootstrap.config.log.dir}/nifi-app.log</file>
@@ -43,12 +36,10 @@
 
     <logger name="org.apache.nifi.web.security" level="INFO" additivity="false">
         <appender-ref ref="USER_FILE"/>
-        <appender-ref ref="CONSOLE"/>
     </logger>
 
     <root level="INFO">
         <appender-ref ref="APP_FILE" />
-        <appender-ref ref="CONSOLE" />
     </root>
 
 </configuration>

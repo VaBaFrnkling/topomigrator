@@ -56,7 +56,7 @@ public class LiquibaseSchemaExecutor {
                     Liquibase liquibase = new Liquibase(changelogPath.getFileName().toString(), resourceAccessor, database);
                     liquibase.update(new Contexts(), new LabelExpression());
                 } catch (Exception e) {
-                    throw new InvalidChangelogException("Error al ejecutar Liquibase para el changelog " + changelogPath.getFileName() + " en la BBDD destino.", e);
+                    throw new InvalidChangelogException("Error al ejecutar Liquibase para el changelog " + changelogPath.getFileName() + " en la base de datos destino.", e);
                 }
             }
         } catch (Exception e) {

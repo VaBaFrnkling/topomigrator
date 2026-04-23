@@ -1,0 +1,21 @@
+databaseChangeLog:
+  - changeSet:
+      id: 1
+      author: topomigrator
+      changes:
+        - createTable:
+            tableName: nombre_tabla
+            schemaName: nombre_esquema
+            columns:
+              - column:
+                  name: id
+                  type: int
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: nombre
+                  type: varchar(255)
+              - column:
+                  name: fecha_creacion
+                  type: timestamp

@@ -62,4 +62,24 @@ public class DatabaseConnectionManager {
 
         return connection;
     }
+
+    /**
+     * Verifica que la conexión a la base de datos es accesible.
+     * Abre y cierra una conexión JDBC para validar la conectividad previa a la migración.
+     *
+     * @param config Configuración de conexión a verificar.
+     * @param label  Etiqueta descriptiva para los logs (e.g., "Base de Datos Origen").
+     * @throws RuntimeException si la conexión no se puede establecer.
+     */
+    public static void testConnection(ConnectionConfig config, String label) {
+        log.info("Verificando conectividad con {}...", label);
+        try (Connection conn = getConnection(config)) {
+            if (conn != null && !conn.isClosed()) {
+                log.info("✔ Conexión a {} verificada correctamente.", label);
+            }
+        } catch (SQLException e) {
+            log.error("✘ No se pudo conectar a {}: {}", label, e.getMessage());
+            throw new RuntimeException("Fallo en la prueba de conexión a " + label + ": " + e.getMessage(), e);
+        }
+    }
 }

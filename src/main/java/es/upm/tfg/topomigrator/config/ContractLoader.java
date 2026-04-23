@@ -12,7 +12,10 @@ import org.yaml.snakeyaml.LoaderOptions;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Map;
 
 /**
  * Lee y parsea el fichero contract.yaml usando SnakeYAML,
@@ -39,8 +42,8 @@ public class ContractLoader {
         try (InputStream is = new FileInputStream(contractPath.toFile())) {
             MigrationContract contract = yaml.load(is);
 
-            // Inyectar configuración de base de datos puramente desde variables de entorno
-            injectDatabaseConfigurationFromEnv(contract);
+            // Cargar configuración de bases de datos desde fichero datasources.yaml
+            loadDatabaseConfigurationFromYaml(contract);
 
             // Resolver usuario de ejecución si utiliza la variable de entorno
             if (contract.getMigration() != null) {
@@ -76,32 +79,56 @@ public class ContractLoader {
     }
 
     /**
-     * Construye la configuración de la BD (DatabaseConfig, ConnectionConfig)
-     * leyendo exclusivamente del entorno, ya que se ha sacado del YAML.
+     * Carga la configuración de conexión a las bases de datos desde el fichero
+     * datasources.yaml ubicado en configs/.
+     *
+     * @param contract Contrato al que se le inyectará la configuración de BD.
+     * @throws IOException si el fichero no existe o no puede leerse.
      */
-    private void injectDatabaseConfigurationFromEnv(MigrationContract contract) {
-        DatabaseConfig dbConfig = new DatabaseConfig();
+    @SuppressWarnings("unchecked")
+    private void loadDatabaseConfigurationFromYaml(MigrationContract contract) throws IOException {
+        String dsPathStr = System.getenv("DATASOURCES_CONFIG_PATH");
+        if (dsPathStr == null || dsPathStr.trim().isEmpty()) {
+            dsPathStr = "configs/datasources.yaml";
+        }
+        Path dsPath = Paths.get(dsPathStr);
 
-        // --- Conexión Origen ---
-        ConnectionConfig source = new ConnectionConfig();
-        source.setDriver("org.postgresql.Driver"); // Valor asumido por defecto
-        source.setJdbcUrl(System.getenv("SOURCE_DB_URL"));
-        source.setUsername(System.getenv("SOURCE_DB_USER"));
-        source.setPassword(System.getenv("SOURCE_DB_PASSWORD"));
-        dbConfig.setSourceConnection(source);
+        log.info("Cargando configuración de bases de datos desde: {}", dsPath.toAbsolutePath());
 
-        // --- Conexión Destino ---
-        ConnectionConfig target = new ConnectionConfig();
-        target.setDriver("org.postgresql.Driver"); // Valor asumido por defecto
-        target.setJdbcUrl(System.getenv("TARGET_DB_URL"));
-        target.setUsername(System.getenv("TARGET_DB_USER"));
-        target.setPassword(System.getenv("TARGET_DB_PASSWORD"));
-        dbConfig.setTargetConnection(target);
+        if (!Files.exists(dsPath)) {
+            throw new IOException("Fichero de datasources no encontrado: " + dsPath.toAbsolutePath());
+        }
 
+        Yaml yaml = new Yaml();
+        try (InputStream dsIs = new FileInputStream(dsPath.toFile())) {
+            Map<String, Object> data = (Map<String, Object>) yaml.load(dsIs);
+            DatabaseConfig dbConfig = new DatabaseConfig();
 
+            // --- Conexión Origen ---
+            dbConfig.setSourceConnection(buildConnectionConfig(data, "source", dsPath));
 
-        // Se lo inyectamos al contrato
-        contract.setDatabase(dbConfig);
-        log.info("Configuración de base de datos inyectada desde variables de entorno.");
+            // --- Conexión Destino ---
+            dbConfig.setTargetConnection(buildConnectionConfig(data, "target", dsPath));
+
+            contract.setDatabase(dbConfig);
+            log.info("Configuración de bases de datos cargada desde {}.", dsPath.getFileName());
+        }
+    }
+
+    /**
+     * Parsea una sección del fichero datasources.yaml y construye un ConnectionConfig.
+     */
+    @SuppressWarnings("unchecked")
+    private ConnectionConfig buildConnectionConfig(Map<String, Object> data, String section, Path filePath) throws IOException {
+        Map<String, Object> sectionMap = (Map<String, Object>) data.get(section);
+        if (sectionMap == null) {
+            throw new IOException("Sección '" + section + "' no encontrada en " + filePath);
+        }
+        ConnectionConfig config = new ConnectionConfig();
+        config.setDriver(sectionMap.containsKey("driver") ? sectionMap.get("driver").toString() : "org.postgresql.Driver");
+        config.setJdbcUrl(sectionMap.get("jdbcUrl") != null ? sectionMap.get("jdbcUrl").toString() : null);
+        config.setUsername(sectionMap.get("username") != null ? sectionMap.get("username").toString() : null);
+        config.setPassword(sectionMap.get("password") != null ? sectionMap.get("password").toString() : null);
+        return config;
     }
 }

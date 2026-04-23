@@ -8,13 +8,6 @@
     <property name="LOGS_FOLDER" value="outputs/logs" />
     <property name="ERRORS_FOLDER" value="outputs/errors" />
 
-    <!-- ================= 1. CONSOLA ================= -->
-    <appender name="STDOUT" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>${LOG_PATTERN}</pattern>
-        </encoder>
-    </appender>
-
     <!-- ================= 2. FICHERO GLOBAL ================= -->
     <appender name="FILE_ALL" class="ch.qos.logback.core.rolling.RollingFileAppender">
         <file>${LOGS_FOLDER}/application.log</file>
@@ -51,7 +44,6 @@
 
     <!-- ================= ENRUTAMIENTO (ROOT) ================= -->
     <root level="INFO">
-        <appender-ref ref="STDOUT" />
         <appender-ref ref="FILE_ALL" />
         <appender-ref ref="FILE_ERROR" />
     </root>
