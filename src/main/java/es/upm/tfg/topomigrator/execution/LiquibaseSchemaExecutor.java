@@ -40,7 +40,9 @@ public class LiquibaseSchemaExecutor {
         }
         Path changelogsDir = Paths.get(changelogsDirEnv);
 
-        try (Connection targetConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getTargetConnection())) {
+        try (Connection targetConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getTargetConnection());
+             DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(changelogsDir.toAbsolutePath().toFile())) {
+
             Database database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(new JdbcConnection(targetConn));
 
             for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
@@ -52,17 +54,20 @@ public class LiquibaseSchemaExecutor {
                 }
 
                 log.info("Ejecutando Liquibase -> Desplegando estructura para '{}' usando {}", targetTable, changelogPath.getFileName());
-                try (DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(new File(changelogsDir.toAbsolutePath().toString()))) {
+                try {
                     Liquibase liquibase = new Liquibase(changelogPath.getFileName().toString(), resourceAccessor, database);
                     liquibase.update(new Contexts(), new LabelExpression());
                 } catch (Exception e) {
                     throw new InvalidChangelogException("Error al ejecutar Liquibase para el changelog " + changelogPath.getFileName() + " en la base de datos destino.", e);
                 }
             }
+        } catch (InvalidChangelogException e) {
+            // Propagar sin re-envolver para no perder el tipo de excepción
+            throw e;
         } catch (Exception e) {
             throw new RuntimeException("Fallo crítico durante el despliegue de Liquibase en destino", e);
         }
-        log.info("Liquidación Estructural de Liquibase completada. Las tablas destino han sido instanciadas.");
+        log.info("Despliegue estructural de Liquibase completado. Las tablas destino han sido instanciadas.");
     }
 
     private static Path getChangelogPath(Path directory, String targetTableName) {
