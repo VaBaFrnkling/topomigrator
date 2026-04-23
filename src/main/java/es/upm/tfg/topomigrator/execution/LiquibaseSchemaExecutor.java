@@ -4,9 +4,10 @@ import es.upm.tfg.topomigrator.exceptions.InvalidChangelogException;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.util.DatabaseConnectionManager;
-import liquibase.Contexts;
-import liquibase.LabelExpression;
-import liquibase.Liquibase;
+import liquibase.Scope;
+import liquibase.command.CommandScope;
+import liquibase.command.core.UpdateCommandStep;
+import liquibase.command.core.helpers.DbUrlConnectionArgumentsCommandStep;
 import liquibase.database.Database;
 import liquibase.database.DatabaseFactory;
 import liquibase.database.jvm.JdbcConnection;
@@ -14,7 +15,6 @@ import liquibase.resource.DirectoryResourceAccessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -29,7 +29,8 @@ public class LiquibaseSchemaExecutor {
     private static final Logger log = LoggerFactory.getLogger(LiquibaseSchemaExecutor.class);
 
     /**
-     * Despliega estructuralmente (DDL) los cambios de Liquibase en la Base de Datos destino.
+     * Despliega estructuralmente (DDL) los cambios de Liquibase en la Base de Datos
+     * destino.
      */
     public static void applyTargetSchemas(MigrationContract contract) {
         log.info("Fase de Liquibase: Iniciando despliegue de esquemas DDL en Destino.");
@@ -40,25 +41,38 @@ public class LiquibaseSchemaExecutor {
         }
         Path changelogsDir = Paths.get(changelogsDirEnv);
 
-        try (Connection targetConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getTargetConnection());
-             DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(changelogsDir.toAbsolutePath().toFile())) {
+        try (Connection targetConn = DatabaseConnectionManager
+                .getConnection(contract.getDatabase().getTargetConnection());
+                DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(
+                        changelogsDir.toAbsolutePath())) {
 
-            Database database = DatabaseFactory.getInstance().findCorrectDatabaseImplementation(new JdbcConnection(targetConn));
+            Database database = DatabaseFactory.getInstance()
+                    .findCorrectDatabaseImplementation(new JdbcConnection(targetConn));
 
             for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
                 String targetTable = entry.getValue().getTarget().getTable();
                 Path changelogPath = getChangelogPath(changelogsDir, targetTable);
-                
+
                 if (changelogPath == null) {
-                    throw new InvalidChangelogException("Changelog no encontrado para aplicar de la tabla: " + targetTable);
+                    throw new InvalidChangelogException(
+                            "Changelog no encontrado para aplicar de la tabla: " + targetTable);
                 }
 
-                log.info("Ejecutando Liquibase -> Desplegando estructura para '{}' usando {}", targetTable, changelogPath.getFileName());
+                log.info("Ejecutando Liquibase -> Desplegando estructura para '{}' usando {}", targetTable,
+                        changelogPath.getFileName());
                 try {
-                    Liquibase liquibase = new Liquibase(changelogPath.getFileName().toString(), resourceAccessor, database);
-                    liquibase.update(new Contexts(), new LabelExpression());
+                    Map<String, Object> scopeAttrs = Map.of(
+                            Scope.Attr.resourceAccessor.name(), resourceAccessor);
+                    Scope.child(scopeAttrs, () -> {
+                        new CommandScope("update")
+                                .addArgumentValue(DbUrlConnectionArgumentsCommandStep.DATABASE_ARG, database)
+                                .addArgumentValue(UpdateCommandStep.CHANGELOG_FILE_ARG,
+                                        changelogPath.getFileName().toString())
+                                .execute();
+                    });
                 } catch (Exception e) {
-                    throw new InvalidChangelogException("Error al ejecutar Liquibase para el changelog " + changelogPath.getFileName() + " en la base de datos destino.", e);
+                    throw new InvalidChangelogException("Error al ejecutar Liquibase para el changelog "
+                            + changelogPath.getFileName() + " en la base de datos destino.", e);
                 }
             }
         } catch (InvalidChangelogException e) {
@@ -72,9 +86,12 @@ public class LiquibaseSchemaExecutor {
 
     private static Path getChangelogPath(Path directory, String targetTableName) {
         Path directMatch = directory.resolve(targetTableName + ".yaml");
-        if (Files.exists(directMatch)) return directMatch;
+        if (Files.exists(directMatch))
+            return directMatch;
         Path prefixedMatch = directory.resolve("changelog-" + targetTableName + ".yaml");
-        if (Files.exists(prefixedMatch)) return prefixedMatch;
+        if (Files.exists(prefixedMatch))
+            return prefixedMatch;
         return null;
     }
 }
+
