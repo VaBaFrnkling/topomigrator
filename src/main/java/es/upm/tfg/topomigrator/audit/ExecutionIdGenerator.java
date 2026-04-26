@@ -17,6 +17,10 @@ import java.nio.file.Paths;
  * para mantener la secuencia entre múltiples invocaciones del motor.
  * </p>
  * <p>
+ * El limpiador de salidas preserva explícitamente este fichero de estado,
+ * evitando que la secuencia se reinicie al comienzo de cada ejecución.
+ * </p>
+ * <p>
  * Para cada tabla procesada dentro de una ejecución, se genera un
  * sub-identificador con el formato {@code "exec-001-t1"}, {@code "exec-001-t2"}, etc.
  * </p>

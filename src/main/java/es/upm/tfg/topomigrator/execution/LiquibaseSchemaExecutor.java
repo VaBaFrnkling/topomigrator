@@ -4,6 +4,7 @@ import es.upm.tfg.topomigrator.exceptions.InvalidChangelogException;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.util.DatabaseConnectionManager;
+import es.upm.tfg.topomigrator.util.SchemaTableIdentifierUtils;
 import liquibase.Scope;
 import liquibase.command.CommandScope;
 import liquibase.command.core.UpdateCommandStep;
@@ -20,6 +21,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashMap;
+import java.util.stream.Collectors;
 
 /**
  * Ejecutor que conecta a la Base de Datos Destino y aplica manualmente
@@ -40,26 +44,34 @@ public class LiquibaseSchemaExecutor {
             changelogsDirEnv = "changelogs/tables";
         }
         Path changelogsDir = Paths.get(changelogsDirEnv);
+        Set<String> ambiguousTargetTableNames = detectAmbiguousTargetTableNames(contract);
 
         try (Connection targetConn = DatabaseConnectionManager
                 .getConnection(contract.getDatabase().getTargetConnection());
-                DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(
-                        changelogsDir.toAbsolutePath())) {
+             DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(
+                     changelogsDir.toAbsolutePath())) {
 
             Database database = DatabaseFactory.getInstance()
                     .findCorrectDatabaseImplementation(new JdbcConnection(targetConn));
 
             for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
-                String targetTable = entry.getValue().getTarget().getTable();
-                Path changelogPath = getChangelogPath(changelogsDir, targetTable);
+                TableMigration migration = entry.getValue();
+                String targetSchema = migration.getTarget().getSchema();
+                String targetTable = migration.getTarget().getTable();
+                String qualifiedTargetId = SchemaTableIdentifierUtils.toQualifiedIdentifier(targetSchema, targetTable);
+                boolean allowLegacyFallback = !ambiguousTargetTableNames.contains(targetTable.trim().toLowerCase());
+                Path changelogPath = getChangelogPath(changelogsDir, targetSchema, targetTable, allowLegacyFallback);
 
                 if (changelogPath == null) {
-                    throw new InvalidChangelogException(
-                            "Changelog no encontrado para aplicar de la tabla: " + targetTable);
+                    String message = allowLegacyFallback
+                            ? "Changelog no encontrado para aplicar de la tabla destino: " + qualifiedTargetId
+                            : "Changelog no encontrado para aplicar de la tabla destino: " + qualifiedTargetId
+                              + ". Al existir colisión de nombres entre esquemas, el archivo debe llamarse '" + qualifiedTargetId + ".yaml' o 'changelog-" + qualifiedTargetId + ".yaml'.";
+                    throw new InvalidChangelogException(message);
                 }
 
-                log.info("Ejecutando Liquibase -> Desplegando estructura para '{}' usando {}", targetTable,
-                        changelogPath.getFileName());
+                log.info("Ejecutando Liquibase -> Desplegando estructura para '{}' usando {}",
+                        qualifiedTargetId, changelogPath.getFileName());
                 try {
                     Map<String, Object> scopeAttrs = Map.of(
                             Scope.Attr.resourceAccessor.name(), resourceAccessor);
@@ -72,11 +84,10 @@ public class LiquibaseSchemaExecutor {
                     });
                 } catch (Exception e) {
                     throw new InvalidChangelogException("Error al ejecutar Liquibase para el changelog "
-                            + changelogPath.getFileName() + " en la base de datos destino.", e);
+                            + changelogPath.getFileName() + " de la tabla destino " + qualifiedTargetId + " en la base de datos destino.", e);
                 }
             }
         } catch (InvalidChangelogException e) {
-            // Propagar sin re-envolver para no perder el tipo de excepción
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("Fallo crítico durante el despliegue de Liquibase en destino", e);
@@ -84,14 +95,60 @@ public class LiquibaseSchemaExecutor {
         log.info("Despliegue estructural de Liquibase completado. Las tablas destino han sido instanciadas.");
     }
 
-    private static Path getChangelogPath(Path directory, String targetTableName) {
-        Path directMatch = directory.resolve(targetTableName + ".yaml");
-        if (Files.exists(directMatch))
-            return directMatch;
-        Path prefixedMatch = directory.resolve("changelog-" + targetTableName + ".yaml");
-        if (Files.exists(prefixedMatch))
-            return prefixedMatch;
+    private static Set<String> detectAmbiguousTargetTableNames(MigrationContract contract) {
+        Map<String, Integer> countsBySimpleTable = new HashMap<>();
+
+        for (TableMigration tableMigration : contract.getTables().values()) {
+            if (tableMigration == null || tableMigration.getTarget() == null || tableMigration.getTarget().getTable() == null) {
+                continue;
+            }
+            String simpleName = tableMigration.getTarget().getTable().trim().toLowerCase();
+            countsBySimpleTable.merge(simpleName, 1, Integer::sum);
+        }
+
+        return countsBySimpleTable.entrySet().stream()
+                .filter(entry -> entry.getValue() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+    }
+
+    private static Path getChangelogPath(Path directory, String targetSchema, String targetTableName, boolean allowLegacyFallback) {
+        String qualifiedStem = SchemaTableIdentifierUtils.toQualifiedChangelogStem(targetSchema, targetTableName);
+
+        Path directQualifiedMatch = findFileIgnoreCase(directory, qualifiedStem + ".yaml");
+        if (directQualifiedMatch != null) {
+            return directQualifiedMatch;
+        }
+
+        Path prefixedQualifiedMatch = findFileIgnoreCase(directory, "changelog-" + qualifiedStem + ".yaml");
+        if (prefixedQualifiedMatch != null) {
+            return prefixedQualifiedMatch;
+        }
+
+        if (allowLegacyFallback) {
+            Path directLegacyMatch = findFileIgnoreCase(directory, targetTableName.trim() + ".yaml");
+            if (directLegacyMatch != null) {
+                return directLegacyMatch;
+            }
+
+            Path prefixedLegacyMatch = findFileIgnoreCase(directory, "changelog-" + targetTableName.trim() + ".yaml");
+            if (prefixedLegacyMatch != null) {
+                return prefixedLegacyMatch;
+            }
+        }
+
         return null;
     }
-}
 
+    private static Path findFileIgnoreCase(Path directory, String expectedFileName) {
+        try (var stream = Files.list(directory)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().equalsIgnoreCase(expectedFileName))
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+}

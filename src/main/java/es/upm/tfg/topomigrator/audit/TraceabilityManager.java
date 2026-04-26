@@ -2,6 +2,7 @@ package es.upm.tfg.topomigrator.audit;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import es.upm.tfg.topomigrator.util.SchemaTableIdentifierUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,7 +13,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /**
- * Gestor encargado de serializar e inyectar la información de auditoría 
+ * Gestor encargado de serializar e inyectar la información de auditoría
  * del estado de la migración utilizando la librería GSON.
  */
 public class TraceabilityManager {
@@ -24,11 +25,11 @@ public class TraceabilityManager {
 
     public TraceabilityManager() {
         this.gson = new GsonBuilder().setPrettyPrinting().create();
-        
+
         // Determinar directorios, por defecto dentro de un output mapeado en Docker
         this.tracesBaseDir = Paths.get("outputs", "traces").toAbsolutePath();
         this.tracesTablesDir = this.tracesBaseDir.resolve("tables");
-        
+
         initializeDirectories();
     }
 
@@ -49,15 +50,22 @@ public class TraceabilityManager {
             log.error("El trace de tabla proporcionado es nulo o incompleto. No se puede guardar.");
             return;
         }
-        
-        String fileName = trace.table.target.name + ".json";
+
+        String qualifiedTargetId = SchemaTableIdentifierUtils.toQualifiedIdentifier(
+                trace.table.target.schema,
+                trace.table.target.name
+        );
+        String fileName = SchemaTableIdentifierUtils.toTraceFileName(
+                trace.table.target.schema,
+                trace.table.target.name
+        );
         Path targetPath = tracesTablesDir.resolve(fileName);
-        
+
         try (FileWriter writer = new FileWriter(targetPath.toFile())) {
             gson.toJson(trace, writer);
-            log.info("Traza de tabla generada con éxito: {}", targetPath);
+            log.info("Traza de tabla generada con éxito para {}: {}", qualifiedTargetId, targetPath);
         } catch (IOException e) {
-            log.error("Fallo al escribir la traza JSON para la tabla {}: {}", trace.table.target.name, e.getMessage());
+            log.error("Fallo al escribir la traza JSON para la tabla {}: {}", qualifiedTargetId, e.getMessage());
         }
     }
 
@@ -71,7 +79,7 @@ public class TraceabilityManager {
         }
 
         Path targetPath = tracesBaseDir.resolve("summary.json");
-        
+
         try (FileWriter writer = new FileWriter(targetPath.toFile())) {
             gson.toJson(summary, writer);
             log.info("Sumario de auditoría global generado con éxito: {}", targetPath);

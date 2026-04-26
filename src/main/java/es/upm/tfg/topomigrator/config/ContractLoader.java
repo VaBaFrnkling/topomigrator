@@ -5,9 +5,9 @@ import es.upm.tfg.topomigrator.model.DatabaseConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.Constructor;
-import org.yaml.snakeyaml.LoaderOptions;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -16,6 +16,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Lee y parsea el fichero contract.yaml usando SnakeYAML,
@@ -24,6 +26,7 @@ import java.util.Map;
 public class ContractLoader {
 
     private static final Logger log = LoggerFactory.getLogger(ContractLoader.class);
+    private static final Pattern ENV_PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{([A-Za-z0-9_]+)(?::([^}]*))?}");
 
     /**
      * Carga el contrato desde la ruta indicada y fusiona sus propiedades
@@ -42,27 +45,23 @@ public class ContractLoader {
         try (InputStream is = new FileInputStream(contractPath.toFile())) {
             MigrationContract contract = yaml.load(is);
 
-            // Cargar configuración de bases de datos desde fichero datasources.yaml
             loadDatabaseConfigurationFromYaml(contract);
 
-            // Resolver usuario de ejecución si utiliza la variable de entorno
             if (contract.getMigration() != null) {
                 String execUser = contract.getMigration().getAuthor();
                 if ("${USERNAME}".equals(execUser) || "${USER}".equals(execUser)) {
                     String sysUser = System.getProperty("user.name");
                     if (sysUser == null || sysUser.trim().isEmpty()) {
-                        sysUser = System.getenv("USERNAME"); // Windows
+                        sysUser = System.getenv("USERNAME");
                     }
                     if (sysUser == null || sysUser.trim().isEmpty()) {
-                        sysUser = System.getenv("USER"); // Linux/Unix
+                        sysUser = System.getenv("USER");
                     }
                     contract.getMigration().setAuthor(sysUser != null ? sysUser : "unknown_user");
-                    log.info("Usuario de ejecución dinámico evaluado a: {}",
-                            contract.getMigration().getAuthor());
+                    log.info("Usuario de ejecución dinámico evaluado a: {}", contract.getMigration().getAuthor());
                 }
             }
-            
-            // Validar la integridad y los campos mínimos del contrato
+
             es.upm.tfg.topomigrator.validations.ContractValidator.validate(contract, contractPath);
 
             log.info("Contrato cargado y unificado con entorno: {} (v{})",
@@ -78,13 +77,6 @@ public class ContractLoader {
         }
     }
 
-    /**
-     * Carga la configuración de conexión a las bases de datos desde el fichero
-     * datasources.yaml ubicado en configs/.
-     *
-     * @param contract Contrato al que se le inyectará la configuración de BD.
-     * @throws IOException si el fichero no existe o no puede leerse.
-     */
     @SuppressWarnings("unchecked")
     private void loadDatabaseConfigurationFromYaml(MigrationContract contract) throws IOException {
         String dsPathStr = System.getenv("DATASOURCES_CONFIG_PATH");
@@ -104,10 +96,7 @@ public class ContractLoader {
             Map<String, Object> data = (Map<String, Object>) yaml.load(dsIs);
             DatabaseConfig dbConfig = new DatabaseConfig();
 
-            // --- Conexión Origen ---
             dbConfig.setSourceConnection(buildConnectionConfig(data, "source", dsPath));
-
-            // --- Conexión Destino ---
             dbConfig.setTargetConnection(buildConnectionConfig(data, "target", dsPath));
 
             contract.setDatabase(dbConfig);
@@ -115,20 +104,53 @@ public class ContractLoader {
         }
     }
 
-    /**
-     * Parsea una sección del fichero datasources.yaml y construye un ConnectionConfig.
-     */
     @SuppressWarnings("unchecked")
     private ConnectionConfig buildConnectionConfig(Map<String, Object> data, String section, Path filePath) throws IOException {
         Map<String, Object> sectionMap = (Map<String, Object>) data.get(section);
         if (sectionMap == null) {
             throw new IOException("Sección '" + section + "' no encontrada en " + filePath);
         }
+
         ConnectionConfig config = new ConnectionConfig();
-        config.setDriver(sectionMap.containsKey("driver") ? sectionMap.get("driver").toString() : "org.postgresql.Driver");
-        config.setJdbcUrl(sectionMap.get("jdbcUrl") != null ? sectionMap.get("jdbcUrl").toString() : null);
-        config.setUsername(sectionMap.get("username") != null ? sectionMap.get("username").toString() : null);
-        config.setPassword(sectionMap.get("password") != null ? sectionMap.get("password").toString() : null);
+        config.setDriver(resolveEnvironmentPlaceholders(getMapValue(sectionMap, "driver"), section + ".driver"));
+        config.setJdbcUrl(resolveEnvironmentPlaceholders(getMapValue(sectionMap, "jdbcUrl"), section + ".jdbcUrl"));
+        config.setUsername(resolveEnvironmentPlaceholders(getMapValue(sectionMap, "username"), section + ".username"));
+        config.setPassword(resolveEnvironmentPlaceholders(getMapValue(sectionMap, "password"), section + ".password"));
         return config;
+    }
+
+    private String getMapValue(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        return value != null ? value.toString() : null;
+    }
+
+    private String resolveEnvironmentPlaceholders(String rawValue, String fieldName) throws IOException {
+        if (rawValue == null) {
+            return null;
+        }
+
+        Matcher matcher = ENV_PLACEHOLDER_PATTERN.matcher(rawValue);
+        StringBuffer resolved = new StringBuffer();
+        boolean found = false;
+
+        while (matcher.find()) {
+            found = true;
+            String variableName = matcher.group(1);
+            String defaultValue = matcher.group(2);
+            String envValue = System.getenv(variableName);
+
+            if (envValue == null || envValue.trim().isEmpty()) {
+                if (defaultValue != null) {
+                    envValue = defaultValue;
+                } else {
+                    throw new IOException("Falta la variable de entorno requerida '" + variableName + "' para " + fieldName);
+                }
+            }
+
+            matcher.appendReplacement(resolved, Matcher.quoteReplacement(envValue));
+        }
+        matcher.appendTail(resolved);
+
+        return found ? resolved.toString() : rawValue;
     }
 }

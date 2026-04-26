@@ -16,3 +16,6 @@ pom.xml.next
 # OS
 .DS_Store
 Thumbs.db
+
+# Others
+.env

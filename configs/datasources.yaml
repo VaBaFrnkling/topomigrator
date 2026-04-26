@@ -2,19 +2,20 @@
 #  Configuración de conexiones JDBC a las bases de datos.
 #  Fichero: datasources.yaml
 #
-#  Define los parámetros de conexión para las bases de datos de origen
-#  y destino utilizadas durante la migración. Modifica las URLs,
-#  usuarios y contraseñas según tu entorno.
+#  Seguridad:
+#  - Las credenciales se resuelven desde variables de entorno.
+#  - Puedes usar la sintaxis ${VAR} o ${VAR:valor_por_defecto}.
+#  - No guardes contraseñas reales en este fichero.
 # ═══════════════════════════════════════════════════════════════════════════
 
 source:
-  driver: org.postgresql.Driver
-  jdbcUrl: jdbc:postgresql://postgres-source:5432/source_db
-  username: source_user
-  password: source_password
+  driver: ${SOURCE_DB_DRIVER:org.postgresql.Driver}
+  jdbcUrl: ${SOURCE_DB_JDBC_URL}
+  username: ${SOURCE_DB_USERNAME}
+  password: ${SOURCE_DB_PASSWORD}
 
 target:
-  driver: org.postgresql.Driver
-  jdbcUrl: jdbc:postgresql://postgres-target:5432/target_db
-  username: target_user
-  password: target_password
+  driver: ${TARGET_DB_DRIVER:org.postgresql.Driver}
+  jdbcUrl: ${TARGET_DB_JDBC_URL}
+  username: ${TARGET_DB_USERNAME}
+  password: ${TARGET_DB_PASSWORD}

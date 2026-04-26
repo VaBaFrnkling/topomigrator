@@ -1,43 +1,46 @@
 # Docker Compose para topomigrator
 # Levanta 2 servicios: app principal y Apache NiFi.
-# Las bases de datos se configuran externamente en configs/datasources.yaml.
+# Las credenciales deben declararse en un fichero .env local o en variables de entorno del sistema.
 # Uso: docker compose up --build
 
 services:
 
-  # Aplicación principal — se construye desde el Dockerfile del proyecto
   topomigrator:
     build: .
     container_name: topomigrator
-    # Espera a que NiFi haya arrancado
     depends_on:
       nifi:
         condition: service_started
-    # Carpetas compartidas entre el host y el contenedor
     volumes:
-      - ./configs:/app/configs # Configuración de entrada
-      - ./flows:/app/flows # Flows NiFi generados
-      - ./outputs:/app/outputs # Logs, errores y trazas
-      - ./changelogs:/app/changelogs # Scripts DDL de los esquemas destino
+      - ./configs:/app/configs
+      - ./flows:/app/flows
+      - ./outputs:/app/outputs
+      - ./changelogs:/app/changelogs
     environment:
-      # API REST de NiFi (HTTPS obligatorio en 2.0)
-      NIFI_BASE_URL: https://nifi:8443/nifi-api
-      NIFI_USERNAME: admin
-      NIFI_PASSWORD: Admin123456!!
+      NIFI_BASE_URL: ${NIFI_BASE_URL:-https://nifi:8443/nifi-api}
+      NIFI_USERNAME: ${NIFI_USERNAME:?Define NIFI_USERNAME en .env o en el entorno}
+      NIFI_PASSWORD: ${NIFI_PASSWORD:?Define NIFI_PASSWORD en .env o en el entorno}
+      NIFI_ALLOW_INSECURE_LOCAL_TLS: ${NIFI_ALLOW_INSECURE_LOCAL_TLS:-false}
       MIGRATION_CONFIG_PATH: /app/configs/contract.yaml
       DATASOURCES_CONFIG_PATH: /app/configs/datasources.yaml
+      SOURCE_DB_DRIVER: ${SOURCE_DB_DRIVER:-org.postgresql.Driver}
+      SOURCE_DB_JDBC_URL: ${SOURCE_DB_JDBC_URL:?Define SOURCE_DB_JDBC_URL}
+      SOURCE_DB_USERNAME: ${SOURCE_DB_USERNAME:?Define SOURCE_DB_USERNAME}
+      SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD:?Define SOURCE_DB_PASSWORD}
+      TARGET_DB_DRIVER: ${TARGET_DB_DRIVER:-org.postgresql.Driver}
+      TARGET_DB_JDBC_URL: ${TARGET_DB_JDBC_URL:?Define TARGET_DB_JDBC_URL}
+      TARGET_DB_USERNAME: ${TARGET_DB_USERNAME:?Define TARGET_DB_USERNAME}
+      TARGET_DB_PASSWORD: ${TARGET_DB_PASSWORD:?Define TARGET_DB_PASSWORD}
     networks:
       - topomigrator-net
 
-
-  # Apache NiFi 2.x — UI en https://localhost:8443/nifi (admin / Admin123456!!)
   nifi:
     image: apache/nifi:2.9.0
     container_name: nifi
     environment:
       NIFI_WEB_HTTPS_PORT: 8443
-      SINGLE_USER_CREDENTIALS_USERNAME: admin
-      SINGLE_USER_CREDENTIALS_PASSWORD: Admin123456!!
+      SINGLE_USER_CREDENTIALS_USERNAME: ${NIFI_USERNAME:?Define NIFI_USERNAME en .env o en el entorno}
+      SINGLE_USER_CREDENTIALS_PASSWORD: ${NIFI_PASSWORD:?Define NIFI_PASSWORD en .env o en el entorno}
     ports:
       - "8443:8443"
     volumes:
@@ -47,7 +50,6 @@ services:
     networks:
       - topomigrator-net
 
-# Red interna — los servicios se comunican por nombre (ej: postgres-source:5432)
 networks:
   topomigrator-net:
     driver: bridge

@@ -3,6 +3,7 @@ package es.upm.tfg.topomigrator.validations;
 import es.upm.tfg.topomigrator.exceptions.InvalidChangelogException;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
+import es.upm.tfg.topomigrator.util.SchemaTableIdentifierUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.yaml.snakeyaml.Yaml;
@@ -13,11 +14,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
-import java.util.List;
+import java.util.Set;
+import java.util.HashMap;
+import java.util.stream.Collectors;
 
 /**
- * Validador encargado de asegurar que los ficheros Liquibase (changelogs) 
- * proporcionados por el usuario para las tablas de destino existen y 
+ * Validador encargado de asegurar que los ficheros Liquibase (changelogs)
+ * proporcionados por el usuario para las tablas de destino existen y
  * tienen un formato YAML válido antes de comenzar la migración.
  */
 public class TargetChangelogValidator {
@@ -37,44 +40,48 @@ public class TargetChangelogValidator {
             throw new InvalidChangelogException("El contrato proporcionado es nulo o no contiene tablas.");
         }
 
-        // Obtener la ruta del directorio de changelogs desde entorno o por defecto
         String changelogsDirEnv = System.getenv("CHANGELOGS_DIR");
         if (changelogsDirEnv == null || changelogsDirEnv.trim().isEmpty()) {
             changelogsDirEnv = "changelogs/tables";
         }
-        
+
         Path changelogsDir = Paths.get(changelogsDirEnv);
 
         if (!Files.exists(changelogsDir) || !Files.isDirectory(changelogsDir)) {
             throw new InvalidChangelogException("No se ha encontrado el directorio de changelogs destino: " + changelogsDir.toAbsolutePath());
         }
 
+        Set<String> ambiguousTargetTableNames = detectAmbiguousTargetTableNames(contract);
         Yaml yamlParser = new Yaml();
 
         for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
-            String tableId = entry.getKey();
             TableMigration tableDef = entry.getValue();
-            
+
             if (tableDef.getTarget() == null || tableDef.getTarget().getTable() == null) {
-                continue; // Validación cubierta por ContractValidator
+                continue;
             }
 
+            String targetSchema = tableDef.getTarget().getSchema();
             String targetTable = tableDef.getTarget().getTable();
-            Path changelogPath = findChangelogForTable(changelogsDir, targetTable);
+            String qualifiedTargetId = SchemaTableIdentifierUtils.toQualifiedIdentifier(targetSchema, targetTable);
+            boolean allowLegacyFallback = !ambiguousTargetTableNames.contains(targetTable.trim().toLowerCase());
+
+            Path changelogPath = findChangelogForTable(changelogsDir, targetSchema, targetTable, allowLegacyFallback);
 
             if (changelogPath == null) {
-                throw new InvalidChangelogException(
-                    String.format("No se ha encontrado un archivo Liquibase para la tabla destino '%s' (Esperado: %s.yaml o changelog-%s.yaml en %s)", 
-                        targetTable, targetTable, targetTable, changelogsDir.toAbsolutePath())
-                );
+                String message = allowLegacyFallback
+                        ? String.format("No se ha encontrado un archivo Liquibase para la tabla destino '%s' (Esperado preferentemente: %s.yaml o changelog-%s.yaml en %s; como compatibilidad, también se acepta %s.yaml)",
+                            qualifiedTargetId, qualifiedTargetId, qualifiedTargetId, changelogsDir.toAbsolutePath(), targetTable)
+                        : String.format("No se ha encontrado un archivo Liquibase para la tabla destino '%s'. Debe existir un changelog con identificador completo de esquema: %s.yaml o changelog-%s.yaml en %s",
+                            qualifiedTargetId, qualifiedTargetId, qualifiedTargetId, changelogsDir.toAbsolutePath());
+                throw new InvalidChangelogException(message);
             }
 
-            log.info("Validando sintaxis Liquibase del archivo: {}", changelogPath.getFileName());
+            log.info("Validando sintaxis Liquibase del archivo '{}' para la tabla destino '{}'", changelogPath.getFileName(), qualifiedTargetId);
 
-            // Validar que el archivo se puede parsear como YAML y tiene la raíz correcta
             try (InputStream is = new FileInputStream(changelogPath.toFile())) {
                 Object parsedYaml = yamlParser.load(is);
-                
+
                 if (!(parsedYaml instanceof Map)) {
                     throw new InvalidChangelogException("El archivo " + changelogPath.getFileName() + " no contiene una estructura YAML válida para Liquibase.");
                 }
@@ -82,12 +89,9 @@ public class TargetChangelogValidator {
                 Map<?, ?> rootNode = (Map<?, ?>) parsedYaml;
                 if (!rootNode.containsKey("databaseChangeLog")) {
                     throw new InvalidChangelogException(
-                        "El archivo " + changelogPath.getFileName() + " no contiene la marca raíz 'databaseChangeLog' obligatoria en Liquibase."
+                            "El archivo " + changelogPath.getFileName() + " no contiene la marca raíz 'databaseChangeLog' obligatoria en Liquibase."
                     );
                 }
-                
-                // Extra validation can be added here if needed (e.g. checking if it actually creates the targetTable)
-                
             } catch (Exception e) {
                 if (e instanceof InvalidChangelogException) {
                     throw (InvalidChangelogException) e;
@@ -95,25 +99,69 @@ public class TargetChangelogValidator {
                 throw new InvalidChangelogException("Error al parsear el archivo Liquibase " + changelogPath.getFileName() + ": " + e.getMessage(), e);
             }
         }
-        
+
         log.info("Validación de Changelogs completada con éxito. Todos los archivos requeridos están presentes y son YAML válidos.");
+    }
+
+    private static Set<String> detectAmbiguousTargetTableNames(MigrationContract contract) {
+        Map<String, Integer> countsBySimpleTable = new HashMap<>();
+
+        for (TableMigration tableMigration : contract.getTables().values()) {
+            if (tableMigration == null || tableMigration.getTarget() == null || tableMigration.getTarget().getTable() == null) {
+                continue;
+            }
+            String simpleName = tableMigration.getTarget().getTable().trim().toLowerCase();
+            countsBySimpleTable.merge(simpleName, 1, Integer::sum);
+        }
+
+        return countsBySimpleTable.entrySet().stream()
+                .filter(entry -> entry.getValue() > 1)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
     }
 
     /**
      * Busca un archivo changelog correspondiente a una tabla destino específica,
-     * admitiendo la convención "tabla.yaml" o "changelog-tabla.yaml".
+     * priorizando la convención segura schema.table.yaml / changelog-schema.table.yaml.
+     * Solo admite el fallback legado por nombre simple cuando no existe ambigüedad.
      */
-    private static Path findChangelogForTable(Path directory, String targetTableName) {
-        Path directMatch = directory.resolve(targetTableName + ".yaml");
-        if (Files.exists(directMatch) && Files.isRegularFile(directMatch)) {
-            return directMatch;
+    private static Path findChangelogForTable(Path directory, String targetSchema, String targetTableName, boolean allowLegacyFallback) {
+        String qualifiedStem = SchemaTableIdentifierUtils.toQualifiedChangelogStem(targetSchema, targetTableName);
+
+        Path directQualifiedMatch = findFileIgnoreCase(directory, qualifiedStem + ".yaml");
+        if (directQualifiedMatch != null) {
+            return directQualifiedMatch;
         }
 
-        Path prefixedMatch = directory.resolve("changelog-" + targetTableName + ".yaml");
-        if (Files.exists(prefixedMatch) && Files.isRegularFile(prefixedMatch)) {
-            return prefixedMatch;
+        Path prefixedQualifiedMatch = findFileIgnoreCase(directory, "changelog-" + qualifiedStem + ".yaml");
+        if (prefixedQualifiedMatch != null) {
+            return prefixedQualifiedMatch;
+        }
+
+        if (allowLegacyFallback) {
+            Path directLegacyMatch = findFileIgnoreCase(directory, targetTableName.trim() + ".yaml");
+            if (directLegacyMatch != null) {
+                return directLegacyMatch;
+            }
+
+            Path prefixedLegacyMatch = findFileIgnoreCase(directory, "changelog-" + targetTableName.trim() + ".yaml");
+            if (prefixedLegacyMatch != null) {
+                return prefixedLegacyMatch;
+            }
         }
 
         return null;
+    }
+
+    private static Path findFileIgnoreCase(Path directory, String expectedFileName) {
+        try (var stream = Files.list(directory)) {
+            return stream
+                    .filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().equalsIgnoreCase(expectedFileName))
+                    .findFirst()
+                    .orElse(null);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
