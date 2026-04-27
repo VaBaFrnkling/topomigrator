@@ -1,31 +1,31 @@
 migration:
-  name: migracion_relacional_demo
-  description: "Migración de varias tablas entre esquemas..."
-  version: "0.1"
-  author: ${USERNAME}
+  name: "nombre_migracion"
+  description: "descripcion_de_la_migracion"
+  version: "version"
+  author: "nombre_del_autor"
 
 tables:
   nombre_tabla_1:
     source:
-      schema: nombre_esquema
-      table: nombre_tabla
+      schema: "nombre_esquema"
+      table: "nombre_tabla"
     target:
-      schema: nombre_esquema
-      table: nombre_tabla
-    enabled: true
-    migrationType: full
+      schema: "nombre_esquema"
+      table: "nombre_tabla"
+    enabled: "true/false"
+    migrationType: "full/incremental"
     incrementalConfig:
-      column: fecha_creacion
-      type: timestamp
-      startValue: "2026-01-01T00:00:00"
-      batchSize: 1000
+      column: "nombre_columna"
+      type: "tipo_de_columna"
+      startValue: "valor_inicial"
+      batchSize: numero_de_filas
     filters:
       where: "condicion SQL"
     transformations:
       columns:
         nombre_columna:
-          rename: nuevo_nombre
-          type: tipo_destino
-          trim: true
-          nullDefault: valor
-          caseTransform: uppercase
+          rename: "nuevo_nombre"
+          type: "tipo_destino"
+          trim: true/false
+          nullDefault: "valor"
+          caseTransform: "uppercase/lowercase"
