@@ -44,5 +44,8 @@ public class SummaryTrace {
         public String status;
         public long records;
         public long durationMs;
+        public Long sourceSelectedRecords;
+        public Long targetNetDeltaRecords;
+        public String auditConsistencyStatus;
     }
 }

@@ -17,6 +17,7 @@ public class TableTrace {
     public Map<String, Object> transformations;
     public Map<String, Object> validations;
     public List<String> errors;
+    public AuditMetrics auditMetrics;
 
     public static class TableMapping {
         public SchemaTable source;
@@ -31,5 +32,15 @@ public class TableTrace {
     public static class IncrementalInfo {
         public String column;
         public String lastProcessedValue;
+    }
+
+    public static class AuditMetrics {
+        public String strategy;
+        public Long sourceSelectedRecords;
+        public Long targetRowsBefore;
+        public Long targetRowsAfter;
+        public Long targetNetDelta;
+        public String consistencyStatus;
+        public List<String> warnings;
     }
 }
