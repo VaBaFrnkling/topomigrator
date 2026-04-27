@@ -5,7 +5,7 @@
 #  Seguridad:
 #  - Las credenciales se resuelven desde variables de entorno.
 #  - Puedes usar la sintaxis ${VAR} o ${VAR:valor_por_defecto}.
-#  - No guardes contraseñas reales en este fichero.
+#  - No se guardan contraseñas reales en este fichero.
 # ═══════════════════════════════════════════════════════════════════════════
 
 source:
