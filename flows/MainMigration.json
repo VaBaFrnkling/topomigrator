@@ -528,207 +528,6 @@
             "groupIdentifier": "aef7e379-b403-3d6f-9e10-00f12816effe"
           },
           {
-            "identifier": "874acf9e-019d-1000-fbbc-67972a501fdc",
-            "instanceIdentifier": "846b7ee6-1740-3176-7ad8-5341adfc860c",
-            "name": "LogAttribute",
-            "comments": "",
-            "position": {
-              "x": -760.0,
-              "y": 600.0
-            },
-            "type": "org.apache.nifi.processors.standard.LogAttribute",
-            "bundle": {
-              "group": "org.apache.nifi",
-              "artifact": "nifi-standard-nar",
-              "version": "2.9.0"
-            },
-            "properties": {
-              "Log FlowFile Properties": "true",
-              "Log Level": "error",
-              "Attributes to Ignore": null,
-              "Attributes to Log": null,
-              "Attributes to Ignore Regular Expression": null,
-              "Output Format": "Single Line",
-              "Log Payload": "false",
-              "Log Prefix": "ExecuteScript_transformations",
-              "Character Set": "UTF-8",
-              "Attributes to Log Regular Expression": ".*"
-            },
-            "propertyDescriptors": {
-              "Log FlowFile Properties": {
-                "name": "Log FlowFile Properties",
-                "displayName": "Log FlowFile Properties",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Log Level": {
-                "name": "Log Level",
-                "displayName": "Log Level",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Attributes to Ignore": {
-                "name": "Attributes to Ignore",
-                "displayName": "Attributes to Ignore",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Attributes to Log": {
-                "name": "Attributes to Log",
-                "displayName": "Attributes to Log",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Attributes to Ignore Regular Expression": {
-                "name": "Attributes to Ignore Regular Expression",
-                "displayName": "Attributes to Ignore Regular Expression",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Output Format": {
-                "name": "Output Format",
-                "displayName": "Output Format",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Log Payload": {
-                "name": "Log Payload",
-                "displayName": "Log Payload",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Log Prefix": {
-                "name": "Log Prefix",
-                "displayName": "Log Prefix",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Character Set": {
-                "name": "Character Set",
-                "displayName": "Character Set",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Attributes to Log Regular Expression": {
-                "name": "Attributes to Log Regular Expression",
-                "displayName": "Attributes to Log Regular Expression",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              }
-            },
-            "style": {},
-            "schedulingPeriod": "0 sec",
-            "schedulingStrategy": "TIMER_DRIVEN",
-            "executionNode": "ALL",
-            "penaltyDuration": "30 sec",
-            "yieldDuration": "1 sec",
-            "bulletinLevel": "WARN",
-            "runDurationMillis": 25,
-            "concurrentlySchedulableTaskCount": 1,
-            "autoTerminatedRelationships": [
-              "success"
-            ],
-            "scheduledState": "ENABLED",
-            "retryCount": 10,
-            "retriedRelationships": [],
-            "backoffMechanism": "PENALIZE_FLOWFILE",
-            "maxBackoffPeriod": "10 mins",
-            "componentType": "PROCESSOR",
-            "groupIdentifier": "aef7e379-b403-3d6f-9e10-00f12816effe"
-          },
-          {
-            "identifier": "10404efb-c7bb-3dc7-9dbe-c7d6c2295744",
-            "instanceIdentifier": "8734b151-019d-1000-02b2-9b82bc641685",
-            "name": "ExecuteScript_transformations",
-            "comments": "",
-            "position": {
-              "x": -760.0,
-              "y": 336.0
-            },
-            "type": "org.apache.nifi.processors.script.ExecuteScript",
-            "bundle": {
-              "group": "org.apache.nifi",
-              "artifact": "nifi-scripting-nar",
-              "version": "2.9.0"
-            },
-            "properties": {
-              "Script File": null,
-              "Script Engine": "Groovy",
-              "Script Body": "import org.apache.nifi.processor.io.StreamCallback\nimport groovy.json.JsonSlurper\nimport groovy.json.JsonOutput\nimport java.nio.charset.StandardCharsets\nimport java.time.LocalDate\nimport java.time.LocalDateTime\nimport java.time.OffsetDateTime\nimport java.time.ZonedDateTime\nimport java.time.format.DateTimeFormatter\nimport java.time.format.DateTimeParseException\n\ndef flowFile = session.get()\nif (!flowFile) return\n\ntry {\n    def transformationsAttr = flowFile.getAttribute(\"transformations.json\")\n\n    def hasText = { val -> val != null && !val.trim().isEmpty() }\n\n    if (!hasText(transformationsAttr)) {\n        flowFile = session.putAttribute(flowFile, \"transformations.applied\", \"false\")\n        flowFile = session.putAttribute(flowFile, \"transformations.reason\", \"No transformations.json attribute found\")\n        session.transfer(flowFile, REL_SUCCESS)\n        return\n    }\n\n    def parsedTransformations = new JsonSlurper().parseText(transformationsAttr)\n    def transformations = parsedTransformations?.columns ?: parsedTransformations\n\n    if (!(transformations instanceof Map) || transformations.isEmpty()) {\n        flowFile = session.putAttribute(flowFile, \"transformations.applied\", \"false\")\n        flowFile = session.putAttribute(flowFile, \"transformations.reason\", \"No transformation rules found\")\n        session.transfer(flowFile, REL_SUCCESS)\n        return\n    }\n\n    def parseDateValue = { value, columnName ->\n        if (value == null) return null\n        def text = value.toString().trim()\n        if (!text) return text\n\n        def datePatterns = [\n            DateTimeFormatter.ISO_LOCAL_DATE,                 // 2026-01-01\n            DateTimeFormatter.ofPattern(\"dd/MM/yyyy\"),       // 01/01/2026\n            DateTimeFormatter.ofPattern(\"dd-MM-yyyy\"),       // 01-01-2026\n            DateTimeFormatter.ofPattern(\"yyyy/MM/dd\"),       // 2026/01/01\n            DateTimeFormatter.ofPattern(\"dd/MM/yy\"),         // 01/01/26\n            DateTimeFormatter.ofPattern(\"dd-MM-yy\")          // 01-01-26\n        ]\n\n        for (formatter in datePatterns) {\n            try {\n                return LocalDate.parse(text, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE)\n            } catch (DateTimeParseException ignored) {}\n        }\n\n        throw new IllegalStateException(\"Date conversion failed for column '${columnName}' with value '${value}'\")\n    }\n\n    def parseTimestampValue = { value, columnName ->\n        if (value == null) return null\n        def text = value.toString().trim()\n        if (!text) return text\n\n        // 1) Intentar formatos ISO con zona\n        try {\n            return OffsetDateTime.parse(text).toLocalDateTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)\n        } catch (DateTimeParseException ignored) {}\n\n        try {\n            return ZonedDateTime.parse(text).toLocalDateTime().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)\n        } catch (DateTimeParseException ignored) {}\n\n        // 2) Intentar formatos ISO locales\n        try {\n            return LocalDateTime.parse(text, DateTimeFormatter.ISO_LOCAL_DATE_TIME)\n                    .format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)\n        } catch (DateTimeParseException ignored) {}\n\n        // 3) Intentar patrones comunes\n        def timestampPatterns = [\n            DateTimeFormatter.ofPattern(\"yyyy-MM-dd HH:mm:ss\"),\n            DateTimeFormatter.ofPattern(\"yyyy-MM-dd HH:mm\"),\n            DateTimeFormatter.ofPattern(\"dd/MM/yyyy HH:mm:ss\"),\n            DateTimeFormatter.ofPattern(\"dd/MM/yyyy HH:mm\"),\n            DateTimeFormatter.ofPattern(\"dd-MM-yyyy HH:mm:ss\"),\n            DateTimeFormatter.ofPattern(\"dd-MM-yyyy HH:mm\"),\n            DateTimeFormatter.ofPattern(\"yyyy/MM/dd HH:mm:ss\"),\n            DateTimeFormatter.ofPattern(\"yyyy/MM/dd HH:mm\"),\n            DateTimeFormatter.ofPattern(\"yyyy-MM-dd'T'HH:mm:ss\"),\n            DateTimeFormatter.ofPattern(\"yyyy-MM-dd'T'HH:mm\")\n        ]\n\n        for (formatter in timestampPatterns) {\n            try {\n                return LocalDateTime.parse(text, formatter).format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)\n            } catch (DateTimeParseException ignored) {}\n        }\n\n        // 4) Si viene solo fecha, convertirla a medianoche\n        try {\n            def d = LocalDate.parse(text, DateTimeFormatter.ISO_LOCAL_DATE)\n            return d.atStartOfDay().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)\n        } catch (DateTimeParseException ignored) {}\n\n        throw new IllegalStateException(\"Timestamp conversion failed for column '${columnName}' with value '${value}'\")\n    }\n\n    def castValue = { value, targetType, columnName ->\n        if (value == null || targetType == null) return value\n\n        try {\n            switch (targetType.toString().toLowerCase()) {\n                case \"int\":\n                case \"integer\":\n                    return Integer.parseInt(value.toString())\n                case \"long\":\n                    return Long.parseLong(value.toString())\n                case \"double\":\n                case \"decimal\":\n                    return Double.parseDouble(value.toString())\n                case \"float\":\n                    return Float.parseFloat(value.toString())\n                case \"boolean\":\n                    return Boolean.parseBoolean(value.toString())\n                case \"string\":\n                    return value.toString()\n                case \"timestamp\":\n                    return parseTimestampValue(value, columnName)\n                case \"date\":\n                    return parseDateValue(value, columnName)\n                default:\n                    return value\n            }\n        } catch (Exception ex) {\n            throw new IllegalStateException(\"Type conversion failed for column '${columnName}' with value '${value}' to type '${targetType}'\", ex)\n        }\n    }\n\n    def normalizeCase = { value, caseType ->\n        if (!(value instanceof String) || caseType == null) return value\n\n        switch (caseType.toString().toLowerCase()) {\n            case \"upper\":\n            case \"uppercase\":\n                return value.toUpperCase()\n            case \"lower\":\n            case \"lowercase\":\n                return value.toLowerCase()\n            default:\n                return value\n        }\n    }\n\n    def applyRulesToRow = { row ->\n        if (!(row instanceof Map)) return\n\n        transformations.each { originalColumn, rules ->\n            if (!(rules instanceof Map)) return\n\n            def columnName = originalColumn.toString()\n\n            if (!row.containsKey(columnName)) return\n\n            def currentValue = row[columnName]\n\n            // 1. nullDefault\n            if (rules.containsKey(\"nullDefault\") && currentValue == null) {\n                currentValue = rules[\"nullDefault\"]\n            }\n\n            // 2. trim\n            if (rules.containsKey(\"trim\") &&\n                rules[\"trim\"] == true &&\n                currentValue instanceof String) {\n                currentValue = currentValue.trim()\n            }\n\n            // 3. case\n            if (rules.containsKey(\"case\")) {\n                currentValue = normalizeCase(currentValue, rules[\"case\"])\n            }\n\n            // 4. type\n            if (rules.containsKey(\"type\") && currentValue != null) {\n                currentValue = castValue(currentValue, rules[\"type\"], columnName)\n            }\n\n            // Actualizar valor antes de rename\n            row[columnName] = currentValue\n\n            // 5. rename\n            if (rules.containsKey(\"rename\")) {\n                def newColumnName = rules[\"rename\"]?.toString()\n\n                if (newColumnName != null && !newColumnName.trim().isEmpty() && newColumnName != columnName) {\n                    row[newColumnName] = row[columnName]\n                    row.remove(columnName)\n                }\n            }\n        }\n    }\n\n    flowFile = session.write(flowFile, { inputStream, outputStream ->\n        def text = inputStream.getText(StandardCharsets.UTF_8.name())\n\n        if (!hasText(text)) {\n            throw new IllegalStateException(\"FlowFile content is empty\")\n        }\n\n        def json = new JsonSlurper().parseText(text)\n\n        if (json instanceof List) {\n            json.each { applyRulesToRow(it) }\n        } else if (json instanceof Map) {\n            applyRulesToRow(json)\n        } else {\n            throw new IllegalStateException(\"Unsupported JSON content structure. Expected List or Map.\")\n        }\n\n        outputStream.write(JsonOutput.toJson(json).getBytes(StandardCharsets.UTF_8))\n    } as StreamCallback)\n\n    flowFile = session.putAttribute(flowFile, \"transformations.applied\", \"true\")\n    flowFile = session.putAttribute(flowFile, \"transformations.reason\", \"Transformation rules applied successfully\")\n    session.transfer(flowFile, REL_SUCCESS)\n\n} catch (Exception e) {\n    log.error(\"Error applying transformations\", e)\n    flowFile = session.putAttribute(flowFile, \"transformations.applied\", \"false\")\n    flowFile = session.putAttribute(flowFile, \"transformations.error\", e.getMessage() ?: \"unknown error\")\n    session.transfer(flowFile, REL_FAILURE)\n}",
-              "Module Directory": null
-            },
-            "propertyDescriptors": {
-              "Script File": {
-                "name": "Script File",
-                "displayName": "Script File",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false,
-                "resourceDefinition": {
-                  "cardinality": "SINGLE",
-                  "resourceTypes": [
-                    "FILE"
-                  ]
-                }
-              },
-              "Script Engine": {
-                "name": "Script Engine",
-                "displayName": "Script Engine",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Script Body": {
-                "name": "Script Body",
-                "displayName": "Script Body",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false
-              },
-              "Module Directory": {
-                "name": "Module Directory",
-                "displayName": "Module Directory",
-                "identifiesControllerService": false,
-                "sensitive": false,
-                "dynamic": false,
-                "resourceDefinition": {
-                  "cardinality": "MULTIPLE",
-                  "resourceTypes": [
-                    "DIRECTORY",
-                    "FILE"
-                  ]
-                }
-              }
-            },
-            "style": {},
-            "schedulingPeriod": "0 sec",
-            "schedulingStrategy": "TIMER_DRIVEN",
-            "executionNode": "ALL",
-            "penaltyDuration": "30 sec",
-            "yieldDuration": "1 sec",
-            "bulletinLevel": "WARN",
-            "runDurationMillis": 0,
-            "concurrentlySchedulableTaskCount": 1,
-            "autoTerminatedRelationships": [],
-            "scheduledState": "ENABLED",
-            "retryCount": 10,
-            "retriedRelationships": [],
-            "backoffMechanism": "PENALIZE_FLOWFILE",
-            "maxBackoffPeriod": "10 mins",
-            "componentType": "PROCESSOR",
-            "groupIdentifier": "aef7e379-b403-3d6f-9e10-00f12816effe"
-          },
-          {
             "identifier": "336e7e8b-3252-3684-abbf-91772c79cb7e",
             "instanceIdentifier": "87358df4-019d-1000-f15b-45d52e636285",
             "name": "PutDatabaseRecord",
@@ -1020,7 +819,6 @@
               "source.table": "##TABLA_ORIGEN##",
               "target.schema": "##ESQUEMA_DESTINO##",
               "target.table": "##TABLA_DESTINO##",
-              "transformations.json": "##TRANSFORMATIONS_JSON##",
               "query.sql": "##QUERY_SQL##"
             },
             "propertyDescriptors": {},
@@ -1171,78 +969,6 @@
             "groupIdentifier": "aef7e379-b403-3d6f-9e10-00f12816effe"
           },
           {
-            "identifier": "7dfb55a2-acc2-30c1-975a-5ae215b83155",
-            "instanceIdentifier": "874af0dd-019d-1000-eb0d-d818a07fc9c4",
-            "name": "",
-            "source": {
-              "id": "10404efb-c7bb-3dc7-9dbe-c7d6c2295744",
-              "type": "PROCESSOR",
-              "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "ExecuteScript_transformations",
-              "comments": "",
-              "instanceIdentifier": "8734b151-019d-1000-02b2-9b82bc641685"
-            },
-            "destination": {
-              "id": "874acf9e-019d-1000-fbbc-67972a501fdc",
-              "type": "PROCESSOR",
-              "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "LogAttribute",
-              "comments": "",
-              "instanceIdentifier": "846b7ee6-1740-3176-7ad8-5341adfc860c"
-            },
-            "labelIndex": 0,
-            "zIndex": 15,
-            "selectedRelationships": [
-              "failure"
-            ],
-            "backPressureObjectThreshold": 10000,
-            "backPressureDataSizeThreshold": "1 GB",
-            "flowFileExpiration": "0 sec",
-            "prioritizers": [],
-            "bends": [],
-            "loadBalanceStrategy": "DO_NOT_LOAD_BALANCE",
-            "partitioningAttribute": "",
-            "loadBalanceCompression": "DO_NOT_COMPRESS",
-            "componentType": "CONNECTION",
-            "groupIdentifier": "aef7e379-b403-3d6f-9e10-00f12816effe"
-          },
-          {
-            "identifier": "3086a323-5354-3fca-aff9-c52a09509767",
-            "instanceIdentifier": "9c0e0b74-019d-1000-f2f2-b335f3186c2f",
-            "name": "",
-            "source": {
-              "id": "10404efb-c7bb-3dc7-9dbe-c7d6c2295744",
-              "type": "PROCESSOR",
-              "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "ExecuteScript_transformations",
-              "comments": "",
-              "instanceIdentifier": "8734b151-019d-1000-02b2-9b82bc641685"
-            },
-            "destination": {
-              "id": "336e7e8b-3252-3684-abbf-91772c79cb7e",
-              "type": "PROCESSOR",
-              "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "PutDatabaseRecord",
-              "comments": "",
-              "instanceIdentifier": "87358df4-019d-1000-f15b-45d52e636285"
-            },
-            "labelIndex": 0,
-            "zIndex": 21,
-            "selectedRelationships": [
-              "success"
-            ],
-            "backPressureObjectThreshold": 10000,
-            "backPressureDataSizeThreshold": "1 GB",
-            "flowFileExpiration": "0 sec",
-            "prioritizers": [],
-            "bends": [],
-            "loadBalanceStrategy": "DO_NOT_LOAD_BALANCE",
-            "partitioningAttribute": "",
-            "loadBalanceCompression": "DO_NOT_COMPRESS",
-            "componentType": "CONNECTION",
-            "groupIdentifier": "aef7e379-b403-3d6f-9e10-00f12816effe"
-          },
-          {
             "identifier": "a44e5b54-5358-3c4c-9f15-132487814b11",
             "instanceIdentifier": "874555d6-019d-1000-860f-ea66014baf5f",
             "name": "",
@@ -1279,42 +1005,6 @@
             "groupIdentifier": "aef7e379-b403-3d6f-9e10-00f12816effe"
           },
           {
-            "identifier": "8c625eda-13c9-3d63-8e68-079e0c7cd56b",
-            "instanceIdentifier": "97be6dd1-019d-1000-aa98-12bd7246af5e",
-            "name": "",
-            "source": {
-              "id": "94ac8ede-eab5-35a4-be62-0a712834c8a0",
-              "type": "PROCESSOR",
-              "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "ExecuteSQLRecord",
-              "comments": "",
-              "instanceIdentifier": "87342cc7-019d-1000-225c-e730cf2af117"
-            },
-            "destination": {
-              "id": "10404efb-c7bb-3dc7-9dbe-c7d6c2295744",
-              "type": "PROCESSOR",
-              "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "ExecuteScript_transformations",
-              "comments": "",
-              "instanceIdentifier": "8734b151-019d-1000-02b2-9b82bc641685"
-            },
-            "labelIndex": 0,
-            "zIndex": 20,
-            "selectedRelationships": [
-              "success"
-            ],
-            "backPressureObjectThreshold": 10000,
-            "backPressureDataSizeThreshold": "1 GB",
-            "flowFileExpiration": "0 sec",
-            "prioritizers": [],
-            "bends": [],
-            "loadBalanceStrategy": "DO_NOT_LOAD_BALANCE",
-            "partitioningAttribute": "",
-            "loadBalanceCompression": "DO_NOT_COMPRESS",
-            "componentType": "CONNECTION",
-            "groupIdentifier": "aef7e379-b403-3d6f-9e10-00f12816effe"
-          },
-          {
             "identifier": "55d03909-a3c0-3f56-bc44-d08a1a337d02",
             "instanceIdentifier": "9d3cd111-019d-1000-7807-7af38a876df4",
             "name": "",
@@ -1336,6 +1026,42 @@
             },
             "labelIndex": 0,
             "zIndex": 22,
+            "selectedRelationships": [
+              "success"
+            ],
+            "backPressureObjectThreshold": 10000,
+            "backPressureDataSizeThreshold": "1 GB",
+            "flowFileExpiration": "0 sec",
+            "prioritizers": [],
+            "bends": [],
+            "loadBalanceStrategy": "DO_NOT_LOAD_BALANCE",
+            "partitioningAttribute": "",
+            "loadBalanceCompression": "DO_NOT_COMPRESS",
+            "componentType": "CONNECTION",
+            "groupIdentifier": "aef7e379-b403-3d6f-9e10-00f12816effe"
+          },
+          {
+            "identifier": "direct-sql-to-putdb-00001",
+            "instanceIdentifier": "direct-sql-putdb-inst-00001",
+            "name": "",
+            "source": {
+              "id": "94ac8ede-eab5-35a4-be62-0a712834c8a0",
+              "type": "PROCESSOR",
+              "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
+              "name": "ExecuteSQLRecord",
+              "comments": "",
+              "instanceIdentifier": "87342cc7-019d-1000-225c-e730cf2af117"
+            },
+            "destination": {
+              "id": "336e7e8b-3252-3684-abbf-91772c79cb7e",
+              "type": "PROCESSOR",
+              "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
+              "name": "PutDatabaseRecord",
+              "comments": "",
+              "instanceIdentifier": "87358df4-019d-1000-f15b-45d52e636285"
+            },
+            "labelIndex": 0,
+            "zIndex": 20,
             "selectedRelationships": [
               "success"
             ],

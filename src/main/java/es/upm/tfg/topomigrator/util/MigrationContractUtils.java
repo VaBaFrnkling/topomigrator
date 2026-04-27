@@ -1,6 +1,5 @@
 package es.upm.tfg.topomigrator.util;
 
-import es.upm.tfg.topomigrator.exceptions.InvalidContractException;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 
@@ -8,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Utilidades para trabajar con el contrato de migración.
+ * Utilidades de manipulación del contrato de migración.
  */
 public final class MigrationContractUtils {
 
@@ -16,36 +15,29 @@ public final class MigrationContractUtils {
     }
 
     /**
-     * Devuelve una copia del contrato que solo contiene las tablas activas.
-     * El resto de capas (validación, DAG, Liquibase, ejecución, auditoría)
-     * deben trabajar siempre con este contrato filtrado.
+     * Devuelve una copia superficial del contrato conservando únicamente las tablas activas
+     * (enabled=true). El resto de metadatos y la configuración de base de datos se mantienen.
      */
     public static MigrationContract retainEnabledTables(MigrationContract originalContract) {
         if (originalContract == null) {
-            throw new InvalidContractException("El contrato proporcionado es nulo.");
+            throw new IllegalArgumentException("El contrato no puede ser nulo.");
         }
 
-        Map<String, TableMigration> originalTables = originalContract.getTables();
-        if (originalTables == null || originalTables.isEmpty()) {
-            throw new InvalidContractException("El contrato no contiene tablas definidas.");
-        }
+        MigrationContract filtered = new MigrationContract();
+        filtered.setMigration(originalContract.getMigration());
+        filtered.setDatabase(originalContract.getDatabase());
 
-        LinkedHashMap<String, TableMigration> enabledTables = new LinkedHashMap<>();
-        for (Map.Entry<String, TableMigration> entry : originalTables.entrySet()) {
-            TableMigration tableMigration = entry.getValue();
-            if (tableMigration != null && tableMigration.isEnabled()) {
-                enabledTables.put(entry.getKey(), tableMigration);
+        Map<String, TableMigration> enabledTables = new LinkedHashMap<>();
+        if (originalContract.getTables() != null) {
+            for (Map.Entry<String, TableMigration> entry : originalContract.getTables().entrySet()) {
+                TableMigration table = entry.getValue();
+                if (table != null && table.isEnabled()) {
+                    enabledTables.put(entry.getKey(), table);
+                }
             }
         }
 
-        if (enabledTables.isEmpty()) {
-            throw new InvalidContractException("No hay tablas activas para procesar. Revisa la propiedad 'enabled' del contrato.");
-        }
-
-        MigrationContract filteredContract = new MigrationContract();
-        filteredContract.setMigration(originalContract.getMigration());
-        filteredContract.setDatabase(originalContract.getDatabase());
-        filteredContract.setTables(enabledTables);
-        return filteredContract;
+        filtered.setTables(enabledTables);
+        return filtered;
     }
 }

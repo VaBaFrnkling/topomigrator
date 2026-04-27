@@ -1,7 +1,6 @@
 package es.upm.tfg.topomigrator.validations;
 
 import es.upm.tfg.topomigrator.exceptions.SchemaCompatibilityException;
-import es.upm.tfg.topomigrator.model.ColumnTransformation;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.util.DatabaseConnectionManager;
@@ -89,8 +88,8 @@ public class SchemaCompatibilityValidator {
                     );
                 }
 
-                // Validar mapeo de columnas
-                validateColumnsMapping(tableNameId, tableDef, sourceColumns, targetColumns);
+                // Validar mapeo directo de columnas (1:1, sin transformaciones)
+                validateColumnsMapping(tableNameId, sourceColumns, targetColumns);
             }
 
         } catch (SQLException e) {
@@ -100,36 +99,17 @@ public class SchemaCompatibilityValidator {
     }
 
     /**
-     * Verifica que cada columna de origen existe en el destino, aplicando reglas de renombrado si aplican.
+     * Verifica que cada columna de origen existe en el destino con mapeo directo (1:1).
      */
-    private static void validateColumnsMapping(String tableNameId, TableMigration tableDef, Map<String, String> sourceColumns, Map<String, String> targetColumns) {
+    private static void validateColumnsMapping(String tableNameId, Map<String, String> sourceColumns, Map<String, String> targetColumns) {
         for (String sourceCol : sourceColumns.keySet()) {
-            String expectedTargetCol = getExpectedTargetColumn(sourceCol, tableDef);
-
-            if (!targetColumns.containsKey(expectedTargetCol.toLowerCase())) {
+            if (!targetColumns.containsKey(sourceCol.toLowerCase())) {
                 throw new SchemaCompatibilityException(
-                        String.format("La columna origen '%s' (mapeada a '%s') no existe en la tabla destino tras generar su esquema.", 
-                        sourceCol, expectedTargetCol)
+                        String.format("La columna origen '%s' no existe en la tabla destino '%s' tras generar su esquema.", 
+                        sourceCol, tableNameId)
                 );
             }
         }
-    }
-
-    /**
-     * Determina el nombre esperado de una columna en el destino tras aplicar
-     * posibles transformaciones de 'rename' configuradas en el contrato.
-     */
-    private static String getExpectedTargetColumn(String sourceCol, TableMigration tableDef) {
-        if (tableDef.getTransformations() != null && tableDef.getTransformations().getColumns() != null) {
-            for (Map.Entry<String, ColumnTransformation> entry : tableDef.getTransformations().getColumns().entrySet()) {
-                if (entry.getKey().equalsIgnoreCase(sourceCol)) {
-                    if (entry.getValue() != null && entry.getValue().getRename() != null) {
-                        return entry.getValue().getRename();
-                    }
-                }
-            }
-        }
-        return sourceCol;
     }
 
     /**

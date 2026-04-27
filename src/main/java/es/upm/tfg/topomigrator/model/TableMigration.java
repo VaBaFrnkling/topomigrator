@@ -11,7 +11,6 @@ public class TableMigration {
     private String migrationType;
     private IncrementalConfig incrementalConfig;
     private FilterConfig filters;
-    private TransformationConfig transformations;
 
     public TableRef getSource() {
         return source;
@@ -61,17 +60,10 @@ public class TableMigration {
         this.filters = filters;
     }
 
-    public TransformationConfig getTransformations() {
-        return transformations;
-    }
-
-    public void setTransformations(TransformationConfig transformations) {
-        this.transformations = transformations;
-    }
-
     @Override
     public String toString() {
         return "TableMigration{source=" + source + ", target=" + target
                 + ", enabled=" + enabled + ", migrationType='" + migrationType + "'}";
     }
 }
+

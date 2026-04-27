@@ -144,6 +144,7 @@ public class ExecutionEngine {
 
                     // Mapa de variables dinámicas a inyectar y reemplazar en el JSON del flow para que NiFi sepa a quién apuntar
                     java.util.Map<String, String> flowConfigVariables = new HashMap<>();
+                    flowConfigVariables.put("##EXECUTION_ID##", executionId);
                     flowConfigVariables.put("##TABLA_ORIGEN##", tableTrace.table.source.name);
                     flowConfigVariables.put("##ESQUEMA_ORIGEN##", tableTrace.table.source.schema != null ? tableTrace.table.source.schema : "public");
                     flowConfigVariables.put("##TABLA_DESTINO##", tableTrace.table.target.name);
@@ -157,16 +158,37 @@ public class ExecutionEngine {
                     flowConfigVariables.put("##TARGET_DB_USER##", contract.getDatabase().getTargetConnection().getUsername());
                     flowConfigVariables.put("##TARGET_DB_PASSWORD##", contract.getDatabase().getTargetConnection().getPassword());
 
-                    // Inyección paramétrica para lógicas de NiFi Condicionales (Ej: ExecuteSQL dinámico)
-                    String migType = tableConfig.getMigrationType() != null ? tableConfig.getMigrationType().toLowerCase() : "full";
-                    flowConfigVariables.put("##TIPO_MIGRACION##", migType);
-                    if ("incremental".equals(migType) && tableConfig.getIncrementalConfig() != null) {
-                        flowConfigVariables.put("##COLUMNA_INCREMENTAL##", tableConfig.getIncrementalConfig().getColumn());
-                        flowConfigVariables.put("##VALOR_INICIAL##", tableConfig.getIncrementalConfig().getStartValue());
-                    } else {
-                        flowConfigVariables.put("##COLUMNA_INCREMENTAL##", "");
-                        flowConfigVariables.put("##VALOR_INICIAL##", "");
+                    // Construcción dinámica del SELECT que NiFi ejecutará (inyectado como query.sql)
+                    String sourceSchema = tableTrace.table.source.schema != null ? tableTrace.table.source.schema : "public";
+                    String sourceTable = tableTrace.table.source.name;
+                    String fullSourceTable = sourceSchema + "." + sourceTable;
+
+                    StringBuilder querySql = new StringBuilder("SELECT * FROM " + fullSourceTable);
+
+                    // Acumular condiciones WHERE: filtro del contrato + migración incremental
+                    java.util.List<String> whereConditions = new ArrayList<>();
+
+                    // Filtro WHERE declarado en el contrato
+                    if (tableConfig.getFilters() != null && tableConfig.getFilters().getWhere() != null
+                            && !tableConfig.getFilters().getWhere().trim().isEmpty()) {
+                        whereConditions.add(tableConfig.getFilters().getWhere().trim());
                     }
+
+                    // Condición incremental (añadida como filtro adicional)
+                    String migType = tableConfig.getMigrationType() != null ? tableConfig.getMigrationType().toLowerCase() : "full";
+                    if ("incremental".equals(migType) && tableConfig.getIncrementalConfig() != null) {
+                        String col = tableConfig.getIncrementalConfig().getColumn();
+                        String startVal = tableConfig.getIncrementalConfig().getStartValue();
+                        if (col != null && startVal != null && !col.isEmpty() && !startVal.isEmpty()) {
+                            whereConditions.add(col + " > '" + startVal + "'");
+                        }
+                    }
+
+                    if (!whereConditions.isEmpty()) {
+                        querySql.append(" WHERE ").append(String.join(" AND ", whereConditions));
+                    }
+
+                    flowConfigVariables.put("##QUERY_SQL##", querySql.toString());
 
                     String pgId = nifiClient.uploadFlowDefinition(rootId, groupName, yOffset, flowPath, flowConfigVariables);
                     nifiClient.changeProcessGroupState(pgId, "RUNNING");
@@ -175,6 +197,14 @@ public class ExecutionEngine {
                     monitorFlowUntilCompletion(pgId, tableName);
 
                     nifiClient.changeProcessGroupState(pgId, "STOPPED");
+
+                    // Limpieza del Process Group temporal para no acumular flujos en NiFi
+                    try {
+                        nifiClient.cleanupProcessGroup(pgId);
+                    } catch (Exception cleanupEx) {
+                        logger.warn("No se pudo limpiar el Process Group {} tras la migración de {}: {}",
+                                pgId, tableName, cleanupEx.getMessage());
+                    }
 
                     targetRowsAfter = safelyCountTargetRows(contract, tableConfig, tableTrace);
                     tableTrace.auditMetrics.targetRowsAfter = targetRowsAfter;
@@ -254,7 +284,9 @@ public class ExecutionEngine {
             JsonObject snap = statusData.getAsJsonObject("processGroupStatus").getAsJsonObject("aggregateSnapshot");
 
             int activeThreads = snap.get("activeThreadCount").getAsInt();
-            int queuedCount = snap.get("queuedCount").getAsInt();
+            // NiFi devuelve queuedCount como String (ej: "0" o "15 (34.5 KB)")
+            String queuedRaw = snap.get("queuedCount").getAsString();
+            int queuedCount = Integer.parseInt(queuedRaw.replaceAll("[^0-9]", ""));
             String bytesRead = snap.get("bytesRead").getAsString();
 
             if (checks % 10 == 0) {

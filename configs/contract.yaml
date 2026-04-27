@@ -12,20 +12,12 @@ tables:
     target:
       schema: "nombre_esquema"
       table: "nombre_tabla"
-    enabled: true/false
-    migrationType: "full/incremental"
+    enabled: true
+    migrationType: "full"
     incrementalConfig:
       column: "nombre_columna"
       type: "tipo_de_columna"
       startValue: "valor_inicial"
-      batchSize: numero_de_filas
+      batchSize: 1000
     filters:
       where: "condicion SQL"
-    transformations:
-      columns:
-        nombre_columna:
-          rename: "nuevo_nombre"
-          type: "tipo_destino"
-          trim: true/false
-          nullDefault: "valor"
-          caseTransform: "uppercase/lowercase"

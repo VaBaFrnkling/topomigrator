@@ -69,8 +69,8 @@ public class ContractLoaderTest extends TestCase {
 
         assertNotNull(contract);
         assertNotNull(contract.getMigration());
-        assertEquals("migracion_relacional_demo", contract.getMigration().getName());
-        assertEquals("0.1", contract.getMigration().getVersion());
+        assertEquals("nombre_migracion", contract.getMigration().getName());
+        assertEquals("version", contract.getMigration().getVersion());
         assertNotNull(contract.getTables());
         assertFalse(contract.getTables().isEmpty());
     }

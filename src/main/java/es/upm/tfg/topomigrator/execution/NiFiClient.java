@@ -43,12 +43,18 @@ public class NiFiClient {
         String envUrl = System.getenv("NIFI_BASE_URL");
         this.baseUrl = envUrl != null ? envUrl : "https://localhost:8443/nifi-api";
         
-        // Credenciales por defecto (Single User Credentials configuradas en compose)
+        // Credenciales obligatorias desde variables de entorno (.env / docker-compose)
         String envUser = System.getenv("NIFI_USERNAME");
-        this.username = envUser != null ? envUser : "admin";
+        if (envUser == null || envUser.trim().isEmpty()) {
+            throw new IllegalStateException("La variable de entorno NIFI_USERNAME es obligatoria y no está definida.");
+        }
+        this.username = envUser;
         
         String envPass = System.getenv("NIFI_PASSWORD");
-        this.password = envPass != null ? envPass : "Admin123456!!";
+        if (envPass == null || envPass.trim().isEmpty()) {
+            throw new IllegalStateException("La variable de entorno NIFI_PASSWORD es obligatoria y no está definida.");
+        }
+        this.password = envPass;
 
         initializeClient();
     }
@@ -469,10 +475,10 @@ public class NiFiClient {
     private void disableControllerService(ControllerServiceRef service) throws Exception {
         String clientId = "topomigrator-" + UUID.randomUUID();
         String payload = "{"
-                + ""revision":{"clientId":"" + clientId + "","version":" + service.version + "},"
-                + ""id":"" + service.id + "","
-                + ""state":"DISABLED","
-                + ""disconnectedNodeAcknowledged":false"
+                + "\"revision\":{\"clientId\":\"" + clientId + "\",\"version\":" + service.version + "},"
+                + "\"id\":\"" + service.id + "\","
+                + "\"state\":\"DISABLED\","
+                + "\"disconnectedNodeAcknowledged\":false"
                 + "}";
 
         HttpRequest request = HttpRequest.newBuilder()

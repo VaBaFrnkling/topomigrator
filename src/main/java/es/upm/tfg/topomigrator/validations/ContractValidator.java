@@ -3,8 +3,6 @@ package es.upm.tfg.topomigrator.validations;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.exceptions.InvalidContractException;
 import es.upm.tfg.topomigrator.model.TableMigration;
-import es.upm.tfg.topomigrator.model.TransformationConfig;
-import es.upm.tfg.topomigrator.model.ColumnTransformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import java.util.Map;
@@ -139,46 +137,6 @@ public class ContractValidator {
             
             if ("incremental".equals(normalizedMigType) && tableDef.getIncrementalConfig() == null) {
                 throw new InvalidContractException("El tipo de migración es 'incremental' pero falta el bloque 'incrementalConfig' en '" + tableName + "'.");
-            }
-
-            // Validar transformations
-            validateTransformations(tableName, tableDef.getTransformations());
-        }
-    }
-
-    /**
-     * Inspecciona a fondo el segmento de transformaciones ('transformations') de una tabla 
-     * específica. Exige que si se declara, contenga al menos una regla operable por columna 
-     * y restringe literales estáticos (como permitir solo 'uppercase' o 'lowercase' en caseTransform).
-     *
-     * @param tableName       El identificador de la tabla siendo analizada.
-     * @param transformations El nodo de configuración de transformaciones a certificar.
-     */
-    private static void validateTransformations(String tableName, TransformationConfig transformations) {
-        if (transformations != null) {
-            if (transformations.getColumns() == null || transformations.getColumns().isEmpty()) {
-                throw new InvalidContractException("La sección de transformaciones para la tabla '" + tableName + "' está presente pero no define ninguna columna.");
-            }
-            for (Map.Entry<String, ColumnTransformation> colEntry : transformations.getColumns().entrySet()) {
-                String colName = colEntry.getKey();
-                ColumnTransformation colDef = colEntry.getValue();
-                if (colDef == null) {
-                    throw new InvalidContractException("La columna '" + colName + "' en devoluciones de '" + tableName + "' es nula.");
-                }
-                
-                // Asegurar de que exista al menos UNA regla de transformación
-                if (colDef.getRename() == null && colDef.getType() == null && colDef.getTrim() == null 
-                        && colDef.getNullDefault() == null && colDef.getCaseTransform() == null) {
-                    throw new InvalidContractException("La columna '" + colName + "' de transformaciones en '" + tableName + "' no tiene dada de alta ninguna regla. Debe tener al menos algo para aplicar.");
-                }
-
-                // Check allowed values
-                if (colDef.getCaseTransform() != null) {
-                    String caseVal = colDef.getCaseTransform().trim().toLowerCase();
-                    if (!caseVal.equals("uppercase") && !caseVal.equals("lowercase")) {
-                        throw new InvalidContractException("Valor no permitido en transformaciones '" + colName + "' para 'caseTransform' ('case'). Solo se permite 'uppercase' o 'lowercase'.");
-                    }
-                }
             }
         }
     }

@@ -11,8 +11,8 @@
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
   <dependencies>
-    <!-- Parser de archivos YAML: se usa para leer y procesar el fichero Contrato.yaml
-         que define el esquema de migración (tablas origen/destino, transformaciones, validaciones) -->
+    <!-- Parser de archivos YAML: se usa para leer y procesar el fichero contract.yaml
+         que define el esquema de migración (tablas origen/destino, filtros, validaciones) -->
     <dependency>
       <groupId>org.yaml</groupId>
       <artifactId>snakeyaml</artifactId>
@@ -67,12 +67,12 @@
       <version>4.27.0</version>
     </dependency>
 
-    <!-- Framework de testing JUnit: permite escribir y ejecutar tests unitarios
+    <!-- Framework de testing JUnit 4: permite escribir y ejecutar tests unitarios
          para verificar el correcto funcionamiento de los componentes del migrador -->
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <version>3.8.1</version>
+      <version>4.13.2</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
