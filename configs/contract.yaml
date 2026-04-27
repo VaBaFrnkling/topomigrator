@@ -12,7 +12,7 @@ tables:
     target:
       schema: "nombre_esquema"
       table: "nombre_tabla"
-    enabled: "true/false"
+    enabled: true/false
     migrationType: "full/incremental"
     incrementalConfig:
       column: "nombre_columna"
