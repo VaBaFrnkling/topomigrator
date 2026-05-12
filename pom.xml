@@ -27,20 +27,12 @@
       <version>2.10.1</version>
     </dependency>
 
-    <!-- Cliente HTTP 5 de Apache: permite realizar peticiones HTTP
-         (útil para conexiones a APIs REST o servicios externos durante la migración) -->
-    <dependency>
-      <groupId>org.apache.httpcomponents.client5</groupId>
-      <artifactId>httpclient5</artifactId>
-      <version>5.3.1</version>
-    </dependency>
-
     <!-- Driver JDBC de PostgreSQL: proporciona la conexión a bases de datos PostgreSQL,
          que son el origen y/o destino de los datos en el proceso de migración -->
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
-      <version>42.7.3</version>
+      <version>42.7.10</version>
     </dependency>
 
     <!-- API de logging SLF4J: fachada de logging que permite escribir mensajes de log

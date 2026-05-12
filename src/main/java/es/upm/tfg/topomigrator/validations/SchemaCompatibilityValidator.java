@@ -1,6 +1,7 @@
 package es.upm.tfg.topomigrator.validations;
 
 import es.upm.tfg.topomigrator.exceptions.SchemaCompatibilityException;
+import es.upm.tfg.topomigrator.model.ConnectionConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.util.DatabaseConnectionManager;
@@ -11,38 +12,45 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.util.HashMap;
+import java.sql.Types;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
- * Validador encargado de comprobar la compatibilidad de esquemas entre las tablas
- * de origen y destino ANTES de llevar a cabo la migración.
+ * Validador encargado de comprobar la compatibilidad estructural entre las tablas
+ * de origen y destino antes de ejecutar el flujo de datos.
  */
 public class SchemaCompatibilityValidator {
 
     private static final Logger log = LoggerFactory.getLogger(SchemaCompatibilityValidator.class);
 
     /**
-     * Valida ÚNICAMENTE la existencia y accesibilidad de las tablas de Origen.
-     * Esto permite detectar fallos preventivos antes de desplegar nada en el Destino.
-     *
-     * @param contract El contrato de migración.
+     * Valida la existencia y accesibilidad de las tablas de origen.
      */
     public static void validateSourceSchemas(MigrationContract contract) {
-        log.info("Iniciando validación pre-migración: Comprobando Base de Datos Origen.");
+        validateSourceSchemas(contract, DatabaseConnectionManager::getConnection);
+    }
 
-        if (contract == null || contract.getTables() == null) {
-            throw new SchemaCompatibilityException("El contrato o las tablas están vacíos.");
-        }
+    static void validateSourceSchemas(MigrationContract contract, ConnectionFactory connectionFactory) {
+        log.info("Iniciando validacion pre-migracion: comprobando Base de Datos Origen.");
 
-        try (Connection sourceConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection())) {
+        ConnectionConfig sourceConnection = requireSourceConnection(contract);
+        validateTables(contract);
+
+        try (Connection sourceConn = connectionFactory.getConnection(sourceConnection)) {
             DatabaseMetaData sourceMeta = sourceConn.getMetaData();
 
             for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
-                String sourceSchema = entry.getValue().getSource().getSchema();
-                String sourceTable = entry.getValue().getSource().getTable();
+                TableMigration tableDef = entry.getValue();
+                validateSourceTableReference(entry.getKey(), tableDef);
 
-                Map<String, String> sourceColumns = getColumns(sourceMeta, sourceSchema, sourceTable);
+                String sourceSchema = tableDef.getSource().getSchema();
+                String sourceTable = tableDef.getSource().getTable();
+
+                Map<String, ColumnMetadata> sourceColumns = getColumns(sourceMeta, sourceSchema, sourceTable);
                 if (sourceColumns.isEmpty()) {
                     throw new SchemaCompatibilityException(
                             String.format("La tabla origen '%s' no existe o no se detectaron columnas accesibles.", formatTableName(sourceSchema, sourceTable))
@@ -51,21 +59,31 @@ public class SchemaCompatibilityValidator {
             }
         } catch (SQLException e) {
             throw new SchemaCompatibilityException("Error JDBC al conectar a la Base de Datos de Origen.", e);
+        } catch (IllegalArgumentException e) {
+            throw new SchemaCompatibilityException("Configuracion JDBC de origen invalida: " + e.getMessage(), e);
         }
         log.info("Todas las tablas origen configuradas existen y son accesibles.");
     }
 
-    /**
-     * Valida que las tablas Destino contengan el mapeo de columnas exacto de las Origen.
-     * Se debe invocar DESPUÉS de que Liquibase haya generado las estructuras destino.
-     *
-     * @param contract El contrato de migración.
-     */
     public static void validateTargetAndMapping(MigrationContract contract) {
-        log.info("Iniciando validación post-despliegue: Mapeo de esquemas Origen vs Destino.");
+        validateTargetAndMapping(contract, DatabaseConnectionManager::getConnection, DatabaseConnectionManager::getConnection);
+    }
 
-        try (Connection sourceConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection());
-             Connection targetConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getTargetConnection())) {
+    /**
+     * Valida que las tablas destino existan tras Liquibase y que mantengan un mapeo estructural compatible
+     * con las tablas origen: columnas, tipos JDBC, longitudes, nullability, claves primarias y claves foraneas basicas.
+     */
+    static void validateTargetAndMapping(MigrationContract contract,
+                                         ConnectionFactory sourceConnectionFactory,
+                                         ConnectionFactory targetConnectionFactory) {
+        log.info("Iniciando validacion post-despliegue: compatibilidad estructural Origen vs Destino.");
+
+        ConnectionConfig sourceConnection = requireSourceConnection(contract);
+        ConnectionConfig targetConnection = requireTargetConnection(contract);
+        validateTables(contract);
+
+        try (Connection sourceConn = sourceConnectionFactory.getConnection(sourceConnection);
+             Connection targetConn = targetConnectionFactory.getConnection(targetConnection)) {
 
             DatabaseMetaData sourceMeta = sourceConn.getMetaData();
             DatabaseMetaData targetMeta = targetConn.getMetaData();
@@ -73,80 +91,286 @@ public class SchemaCompatibilityValidator {
             for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
                 String tableNameId = entry.getKey();
                 TableMigration tableDef = entry.getValue();
+                validateSourceTableReference(tableNameId, tableDef);
+                validateTargetTableReference(tableNameId, tableDef);
 
                 String sourceSchema = tableDef.getSource().getSchema();
                 String sourceTable = tableDef.getSource().getTable();
                 String targetSchema = tableDef.getTarget().getSchema();
                 String targetTable = tableDef.getTarget().getTable();
 
-                Map<String, String> sourceColumns = getColumns(sourceMeta, sourceSchema, sourceTable);
-                Map<String, String> targetColumns = getColumns(targetMeta, targetSchema, targetTable);
+                Map<String, ColumnMetadata> sourceColumns = getColumns(sourceMeta, sourceSchema, sourceTable);
+                Map<String, ColumnMetadata> targetColumns = getColumns(targetMeta, targetSchema, targetTable);
 
+                if (sourceColumns.isEmpty()) {
+                    throw new SchemaCompatibilityException(
+                            String.format("La tabla origen '%s' no existe o no se detectaron columnas accesibles.", formatTableName(sourceSchema, sourceTable))
+                    );
+                }
                 if (targetColumns.isEmpty()) {
                     throw new SchemaCompatibilityException(
                             String.format("La tabla destino '%s' no ha sido creada por Liquibase o no es accesible.", formatTableName(targetSchema, targetTable))
                     );
                 }
 
-                // Validar mapeo directo de columnas (1:1, sin transformaciones)
                 validateColumnsMapping(tableNameId, sourceColumns, targetColumns);
+                validatePrimaryKeys(tableNameId, sourceMeta, targetMeta, sourceSchema, sourceTable, targetSchema, targetTable);
+                validateForeignKeys(tableNameId, sourceMeta, targetMeta, sourceSchema, sourceTable, targetSchema, targetTable);
             }
 
         } catch (SQLException e) {
-            throw new SchemaCompatibilityException("Error al conectar a las bases de datos para comprobar mapeo.", e);
+            throw new SchemaCompatibilityException("Error al conectar a las bases de datos para comprobar compatibilidad estructural.", e);
+        } catch (IllegalArgumentException e) {
+            throw new SchemaCompatibilityException("Configuracion JDBC invalida para comprobar compatibilidad estructural: " + e.getMessage(), e);
         }
-        log.info("Validación de compatibilidad de esquemas (Origen vs Destino) completada con éxito.");
+        log.info("Validacion de compatibilidad estructural completada con exito.");
     }
 
-    /**
-     * Verifica que cada columna de origen existe en el destino con mapeo directo (1:1).
-     */
-    private static void validateColumnsMapping(String tableNameId, Map<String, String> sourceColumns, Map<String, String> targetColumns) {
-        for (String sourceCol : sourceColumns.keySet()) {
-            if (!targetColumns.containsKey(sourceCol.toLowerCase())) {
+    @FunctionalInterface
+    interface ConnectionFactory {
+        Connection getConnection(ConnectionConfig config) throws SQLException;
+    }
+
+    private static ConnectionConfig requireSourceConnection(MigrationContract contract) {
+        if (contract == null) {
+            throw new SchemaCompatibilityException("El contrato no puede ser nulo.");
+        }
+        if (contract.getDatabase() == null) {
+            throw new SchemaCompatibilityException("El contrato no contiene bloque database.");
+        }
+        if (contract.getDatabase().getSourceConnection() == null) {
+            throw new SchemaCompatibilityException("El contrato no contiene conexion de origen.");
+        }
+        return contract.getDatabase().getSourceConnection();
+    }
+
+    private static ConnectionConfig requireTargetConnection(MigrationContract contract) {
+        if (contract == null) {
+            throw new SchemaCompatibilityException("El contrato no puede ser nulo.");
+        }
+        if (contract.getDatabase() == null) {
+            throw new SchemaCompatibilityException("El contrato no contiene bloque database.");
+        }
+        if (contract.getDatabase().getTargetConnection() == null) {
+            throw new SchemaCompatibilityException("El contrato no contiene conexion de destino.");
+        }
+        return contract.getDatabase().getTargetConnection();
+    }
+
+    private static void validateTables(MigrationContract contract) {
+        if (contract.getTables() == null || contract.getTables().isEmpty()) {
+            throw new SchemaCompatibilityException("El contrato no contiene tablas origen activas para validar.");
+        }
+    }
+
+    private static void validateSourceTableReference(String tableName, TableMigration tableDef) {
+        if (tableDef == null) {
+            throw new SchemaCompatibilityException("La configuracion de la tabla '" + tableName + "' es nula.");
+        }
+        if (tableDef.getSource() == null) {
+            throw new SchemaCompatibilityException("La tabla '" + tableName + "' no contiene bloque source.");
+        }
+        if (isBlank(tableDef.getSource().getTable())) {
+            throw new SchemaCompatibilityException("La tabla '" + tableName + "' requiere source.table para validar origen.");
+        }
+    }
+
+    private static void validateTargetTableReference(String tableName, TableMigration tableDef) {
+        if (tableDef.getTarget() == null) {
+            throw new SchemaCompatibilityException("La tabla '" + tableName + "' no contiene bloque target.");
+        }
+        if (isBlank(tableDef.getTarget().getTable())) {
+            throw new SchemaCompatibilityException("La tabla '" + tableName + "' requiere target.table para validar destino.");
+        }
+    }
+
+    private static void validateColumnsMapping(String tableNameId,
+                                               Map<String, ColumnMetadata> sourceColumns,
+                                               Map<String, ColumnMetadata> targetColumns) {
+        for (Map.Entry<String, ColumnMetadata> sourceEntry : sourceColumns.entrySet()) {
+            String sourceCol = sourceEntry.getKey();
+            ColumnMetadata source = sourceEntry.getValue();
+            if (!targetColumns.containsKey(sourceCol)) {
                 throw new SchemaCompatibilityException(
-                        String.format("La columna origen '%s' no existe en la tabla destino '%s' tras generar su esquema.", 
-                        sourceCol, tableNameId)
+                        String.format("La columna origen '%s' no existe en la tabla destino '%s' tras generar su esquema.",
+                                source.name, tableNameId)
+                );
+            }
+
+            ColumnMetadata target = targetColumns.get(sourceCol);
+            if (!areCompatibleTypes(source.jdbcType, target.jdbcType)) {
+                throw new SchemaCompatibilityException(
+                        String.format("La columna '%s' de la tabla '%s' tiene tipo JDBC incompatible. Origen=%s(%d) Destino=%s(%d)",
+                                source.name, tableNameId, source.typeName, source.jdbcType, target.typeName, target.jdbcType)
+                );
+            }
+            if (hasComparableLength(source.jdbcType)
+                    && source.columnSize != null
+                    && target.columnSize != null
+                    && target.columnSize < source.columnSize) {
+                throw new SchemaCompatibilityException(
+                        String.format("La columna '%s' de la tabla '%s' tiene longitud destino insuficiente. Origen=%d Destino=%d",
+                                source.name, tableNameId, source.columnSize, target.columnSize)
+                );
+            }
+            if (source.nullable && !target.nullable) {
+                throw new SchemaCompatibilityException(
+                        String.format("La columna '%s' de la tabla '%s' tiene nullability destino mas restrictiva.",
+                                source.name, tableNameId)
                 );
             }
         }
     }
 
-    /**
-     * Extrae las columnas de una tabla dada utilizando la metadata JDBC.
-     */
-    private static Map<String, String> getColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
-        Map<String, String> columns = new HashMap<>();
-        String schemaPattern = (schema != null && !schema.trim().isEmpty()) ? schema : null;
-        
+    private static void validatePrimaryKeys(String tableNameId,
+                                            DatabaseMetaData sourceMeta,
+                                            DatabaseMetaData targetMeta,
+                                            String sourceSchema,
+                                            String sourceTable,
+                                            String targetSchema,
+                                            String targetTable) throws SQLException {
+        Set<String> sourcePkColumns = getPrimaryKeyColumns(sourceMeta, sourceSchema, sourceTable);
+        Set<String> targetPkColumns = getPrimaryKeyColumns(targetMeta, targetSchema, targetTable);
+
+        if (!sourcePkColumns.isEmpty() && !targetPkColumns.containsAll(sourcePkColumns)) {
+            throw new SchemaCompatibilityException("La tabla destino de '" + tableNameId
+                    + "' no conserva todas las columnas con clave primaria detectadas en origen. Origen="
+                    + sourcePkColumns + " Destino=" + targetPkColumns);
+        }
+    }
+
+    private static void validateForeignKeys(String tableNameId,
+                                            DatabaseMetaData sourceMeta,
+                                            DatabaseMetaData targetMeta,
+                                            String sourceSchema,
+                                            String sourceTable,
+                                            String targetSchema,
+                                            String targetTable) throws SQLException {
+        Set<String> sourceFkColumns = getImportedKeyColumns(sourceMeta, sourceSchema, sourceTable);
+        Set<String> targetFkColumns = getImportedKeyColumns(targetMeta, targetSchema, targetTable);
+
+        if (!sourceFkColumns.isEmpty() && !targetFkColumns.containsAll(sourceFkColumns)) {
+            throw new SchemaCompatibilityException("La tabla destino de '" + tableNameId
+                    + "' no conserva todas las columnas con clave foranea detectadas en origen. Origen="
+                    + sourceFkColumns + " Destino=" + targetFkColumns);
+        }
+    }
+
+    private static Map<String, ColumnMetadata> getColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        Map<String, ColumnMetadata> columns = readColumns(metaData, schema, table);
+        if (!columns.isEmpty()) {
+            return columns;
+        }
+
+        String upperSchema = schema != null ? schema.toUpperCase(Locale.ROOT) : null;
+        columns = readColumns(metaData, upperSchema, table.toUpperCase(Locale.ROOT));
+        if (!columns.isEmpty()) {
+            return columns;
+        }
+
+        String lowerSchema = schema != null ? schema.toLowerCase(Locale.ROOT) : null;
+        return readColumns(metaData, lowerSchema, table.toLowerCase(Locale.ROOT));
+    }
+
+    private static Map<String, ColumnMetadata> readColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        Map<String, ColumnMetadata> columns = new LinkedHashMap<>();
+        String schemaPattern = schema != null && !schema.trim().isEmpty() ? schema : null;
+
         try (ResultSet rs = metaData.getColumns(null, schemaPattern, table, null)) {
             while (rs.next()) {
-                columns.put(rs.getString("COLUMN_NAME").toLowerCase(), rs.getString("TYPE_NAME"));
+                ColumnMetadata column = new ColumnMetadata();
+                column.name = rs.getString("COLUMN_NAME");
+                column.typeName = rs.getString("TYPE_NAME");
+                column.jdbcType = rs.getInt("DATA_TYPE");
+                column.columnSize = rs.getObject("COLUMN_SIZE") != null ? rs.getInt("COLUMN_SIZE") : null;
+                column.decimalDigits = rs.getObject("DECIMAL_DIGITS") != null ? rs.getInt("DECIMAL_DIGITS") : null;
+                column.nullable = rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable;
+                columns.put(column.name.toLowerCase(Locale.ROOT), column);
             }
         }
-        
-        if (columns.isEmpty()) {
-            String upperSchema = (schemaPattern != null) ? schemaPattern.toUpperCase() : null;
-            try (ResultSet rs = metaData.getColumns(null, upperSchema, table.toUpperCase(), null)) {
-                while (rs.next()) {
-                    columns.put(rs.getString("COLUMN_NAME").toLowerCase(), rs.getString("TYPE_NAME"));
-                }
-            }
-        }
-        
-        if (columns.isEmpty()) {
-            String lowerSchema = (schemaPattern != null) ? schemaPattern.toLowerCase() : null;
-            try (ResultSet rs = metaData.getColumns(null, lowerSchema, table.toLowerCase(), null)) {
-                while (rs.next()) {
-                    columns.put(rs.getString("COLUMN_NAME").toLowerCase(), rs.getString("TYPE_NAME"));
-                }
-            }
-        }
-        
         return columns;
+    }
+
+    private static Set<String> getPrimaryKeyColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        Set<String> pkColumns = new HashSet<>();
+        readKeyColumns(metaData, schema, table, pkColumns, true);
+        if (pkColumns.isEmpty()) {
+            readKeyColumns(metaData, schema != null ? schema.toUpperCase(Locale.ROOT) : null, table.toUpperCase(Locale.ROOT), pkColumns, true);
+        }
+        if (pkColumns.isEmpty()) {
+            readKeyColumns(metaData, schema != null ? schema.toLowerCase(Locale.ROOT) : null, table.toLowerCase(Locale.ROOT), pkColumns, true);
+        }
+        return pkColumns;
+    }
+
+    private static Set<String> getImportedKeyColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        Set<String> fkColumns = new HashSet<>();
+        readKeyColumns(metaData, schema, table, fkColumns, false);
+        if (fkColumns.isEmpty()) {
+            readKeyColumns(metaData, schema != null ? schema.toUpperCase(Locale.ROOT) : null, table.toUpperCase(Locale.ROOT), fkColumns, false);
+        }
+        if (fkColumns.isEmpty()) {
+            readKeyColumns(metaData, schema != null ? schema.toLowerCase(Locale.ROOT) : null, table.toLowerCase(Locale.ROOT), fkColumns, false);
+        }
+        return fkColumns;
+    }
+
+    private static void readKeyColumns(DatabaseMetaData metaData,
+                                       String schema,
+                                       String table,
+                                       Set<String> columns,
+                                       boolean primaryKeys) throws SQLException {
+        String schemaPattern = schema != null && !schema.trim().isEmpty() ? schema : null;
+        try (ResultSet rs = primaryKeys
+                ? metaData.getPrimaryKeys(null, schemaPattern, table)
+                : metaData.getImportedKeys(null, schemaPattern, table)) {
+            while (rs.next()) {
+                String column = primaryKeys ? rs.getString("COLUMN_NAME") : rs.getString("FKCOLUMN_NAME");
+                if (column != null) {
+                    columns.add(column.toLowerCase(Locale.ROOT));
+                }
+            }
+        }
+    }
+
+    private static boolean areCompatibleTypes(int sourceType, int targetType) {
+        if (sourceType == targetType) {
+            return true;
+        }
+        return typeFamily(sourceType).equals(typeFamily(targetType));
+    }
+
+    private static String typeFamily(int jdbcType) {
+        return switch (jdbcType) {
+            case Types.TINYINT, Types.SMALLINT, Types.INTEGER, Types.BIGINT,
+                 Types.FLOAT, Types.REAL, Types.DOUBLE, Types.NUMERIC, Types.DECIMAL -> "NUMERIC";
+            case Types.CHAR, Types.VARCHAR, Types.LONGVARCHAR, Types.NCHAR, Types.NVARCHAR, Types.LONGNVARCHAR -> "TEXT";
+            case Types.DATE, Types.TIME, Types.TIME_WITH_TIMEZONE, Types.TIMESTAMP, Types.TIMESTAMP_WITH_TIMEZONE -> "TEMPORAL";
+            case Types.BOOLEAN, Types.BIT -> "BOOLEAN";
+            case Types.BINARY, Types.VARBINARY, Types.LONGVARBINARY, Types.BLOB -> "BINARY";
+            default -> "OTHER_" + jdbcType;
+        };
+    }
+
+    private static boolean hasComparableLength(int jdbcType) {
+        String family = typeFamily(jdbcType);
+        return "TEXT".equals(family) || "BINARY".equals(family);
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     private static String formatTableName(String schema, String table) {
         return (schema != null && !schema.trim().isEmpty() ? schema + "." : "") + table;
+    }
+
+    private static final class ColumnMetadata {
+        private String name;
+        private String typeName;
+        private int jdbcType;
+        private Integer columnSize;
+        private Integer decimalDigits;
+        private boolean nullable;
     }
 }

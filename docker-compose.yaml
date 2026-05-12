@@ -24,6 +24,7 @@ services:
       NIFI_PASSWORD: ${NIFI_PASSWORD:?NIFI_PASSWORD no configurado}
       MIGRATION_CONFIG_PATH: ${MIGRATION_CONFIG_PATH:-/app/configs/contract.yaml}
       DATASOURCES_CONFIG_PATH: ${DATASOURCES_CONFIG_PATH:-/app/configs/datasources.yaml}
+      INCREMENTAL_STATE_PATH: ${INCREMENTAL_STATE_PATH:-/app/outputs/state/incremental-state.json}
       NIFI_ALLOW_INSECURE_LOCAL_TLS: ${NIFI_ALLOW_INSECURE_LOCAL_TLS:-true}
     restart: on-failure:3
     init: true

@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Set;
 import java.util.stream.Stream;
 
 /**
@@ -17,9 +18,11 @@ public class OutputCleaner {
     private static final Logger log = LoggerFactory.getLogger(OutputCleaner.class);
 
     /**
-     * Fichero de estado que debe preservarse para no reiniciar la secuencia de executionId.
+     * Directorios protegidos que nunca deben ser limpiados por esta utilidad.
+     * Guardrail programático: cualquier intento de pasar uno de estos a cleanDirectory
+     * será bloqueado con un log de advertencia en lugar de ejecutarse.
      */
-    private static final Path LAST_EXECUTION_ID_FILE = Paths.get("outputs", "traces", ".last_execution_id").toAbsolutePath().normalize();
+    static final Set<String> PROTECTED_DIRECTORIES = Set.of("state", "logs");
 
     /**
      * Elimina todos los archivos del interior de las carpetas relacionadas con
@@ -27,6 +30,10 @@ public class OutputCleaner {
      * datos fantasmas de ejecuciones anteriores.
      */
     public static void cleanOutputs() {
+        cleanOutputs(Paths.get("outputs"));
+    }
+
+    static void cleanOutputs(Path outputsRoot) {
         log.info("Realizando purga inicial: Borrando archivos de migraciones pasadas...");
 
         // Limpiamos trazas, errores y flujos residuales.
@@ -35,22 +42,34 @@ public class OutputCleaner {
         //   ni los logs en caliente montados por el volumen de NiFi.
         // - outputs/traces/.last_execution_id, porque conserva el contador
         //   secuencial de ejecuciones entre invocaciones.
-        cleanDirectory(Paths.get("outputs", "traces"));
-        cleanDirectory(Paths.get("outputs", "errors"));
-        cleanDirectory(Paths.get("outputs", "flows"));
+        // - outputs/state, porque contiene el cursor incremental persistente.
+        //   Protegido también programáticamente por PROTECTED_DIRECTORIES.
+        Path normalizedRoot = outputsRoot.toAbsolutePath().normalize();
+        Path lastExecutionIdFile = normalizedRoot.resolve(Paths.get("traces", ".last_execution_id")).normalize();
+        cleanDirectory(normalizedRoot, normalizedRoot.resolve("traces"), lastExecutionIdFile);
+        cleanDirectory(normalizedRoot, normalizedRoot.resolve("errors"), lastExecutionIdFile);
+        cleanDirectory(normalizedRoot, normalizedRoot.resolve("flows"), lastExecutionIdFile);
 
         log.info("Entorno /outputs purgado. Todo limpio y claro para iniciar.");
     }
 
-    private static void cleanDirectory(Path directory) {
+    private static void cleanDirectory(Path outputsRoot, Path directory, Path lastExecutionIdFile) {
         if (!Files.exists(directory)) {
+            return;
+        }
+
+        // Guardrail programático: impide limpiar directorios protegidos.
+        Path relativePath = outputsRoot.relativize(directory.toAbsolutePath().normalize());
+        String topLevelDir = relativePath.getName(0).toString().toLowerCase(java.util.Locale.ROOT);
+        if (PROTECTED_DIRECTORIES.contains(topLevelDir)) {
+            log.warn("Intento de limpiar directorio protegido '{}' bloqueado por guardrail. No se elimina nada.", directory);
             return;
         }
 
         try (Stream<Path> walk = Files.walk(directory)) {
             walk.filter(Files::isRegularFile)
                 .forEach(file -> {
-                    if (shouldPreserve(file)) {
+                    if (shouldPreserve(file, lastExecutionIdFile)) {
                         log.debug("Preservando fichero de estado: {}", file);
                         return;
                     }
@@ -65,7 +84,7 @@ public class OutputCleaner {
         }
     }
 
-    private static boolean shouldPreserve(Path file) {
-        return file.toAbsolutePath().normalize().equals(LAST_EXECUTION_ID_FILE);
+    private static boolean shouldPreserve(Path file, Path lastExecutionIdFile) {
+        return file.toAbsolutePath().normalize().equals(lastExecutionIdFile);
     }
 }

@@ -2,121 +2,117 @@ package es.upm.tfg.topomigrator.util;
 
 import junit.framework.TestCase;
 
-import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
  * Tests para {@link OutputCleaner}.
- * Cubre: limpieza de archivos existentes, preservación de directorios,
- * directorios inexistentes (no crash), limpieza de subdirectorios y preservación
- * del fichero de secuencia .last_execution_id.
  */
 public class OutputCleanerTest extends TestCase {
 
-    /** Directorio temporal para los tests. */
-    private Path tempDir;
+    private Path outputsRoot;
 
     @Override
     protected void setUp() throws Exception {
         super.setUp();
-        tempDir = Files.createTempDirectory("output-cleaner-test-");
+        outputsRoot = Files.createTempDirectory("output-cleaner-test-");
     }
 
     @Override
     protected void tearDown() throws Exception {
-        if (tempDir != null && Files.exists(tempDir)) {
-            Files.walk(tempDir)
-                .sorted(java.util.Comparator.reverseOrder())
-                .forEach(p -> {
-                    try { Files.deleteIfExists(p); } catch (IOException ignored) {}
-                });
+        if (outputsRoot != null && Files.exists(outputsRoot)) {
+            Files.walk(outputsRoot)
+                    .sorted(java.util.Comparator.reverseOrder())
+                    .forEach(path -> {
+                        try {
+                            Files.deleteIfExists(path);
+                        } catch (IOException ignored) {
+                        }
+                    });
         }
         super.tearDown();
     }
 
-    public void testCleanOutputsDoesNotCrashOnEmptyDirs() {
-        OutputCleaner.cleanOutputs();
-    }
-
     public void testCleanOutputsDoesNotCrashOnMissingDirs() {
-        OutputCleaner.cleanOutputs();
+        OutputCleaner.cleanOutputs(outputsRoot);
     }
 
-    public void testCleanOutputsDeletesTraceAndErrorFiles() throws Exception {
-        Path tracesDir = Path.of("outputs", "traces");
-        Path errorsDir = Path.of("outputs", "errors");
-        Files.createDirectories(tracesDir);
-        Files.createDirectories(errorsDir);
+    public void testCleanOutputsDeletesTemporaryTraceErrorAndFlowFiles() throws Exception {
+        Path traceFile = write("traces/table-trace.json", "{}");
+        Path errorFile = write("errors/error.log", "error de test");
+        Path flowFile = write("flows/generated-flow.json", "{}");
 
-        Path traceFile = tracesDir.resolve("test_trace_cleanup.json");
-        Path errorFile = errorsDir.resolve("test_error_cleanup.log");
-
-        try (FileWriter w1 = new FileWriter(traceFile.toFile());
-             FileWriter w2 = new FileWriter(errorFile.toFile())) {
-            w1.write("{\"test\": true}");
-            w2.write("error de test");
-        }
-
-        assertTrue(Files.exists(traceFile));
-        assertTrue(Files.exists(errorFile));
-
-        OutputCleaner.cleanOutputs();
+        OutputCleaner.cleanOutputs(outputsRoot);
 
         assertFalse(Files.exists(traceFile));
         assertFalse(Files.exists(errorFile));
-        assertTrue(Files.exists(tracesDir));
-        assertTrue(Files.exists(errorsDir));
+        assertFalse(Files.exists(flowFile));
+        assertTrue(Files.exists(outputsRoot.resolve("traces")));
+        assertTrue(Files.exists(outputsRoot.resolve("errors")));
+        assertTrue(Files.exists(outputsRoot.resolve("flows")));
     }
 
-    public void testCleanOutputsPreservesLogsDirectory() throws Exception {
-        Path logsDir = Path.of("outputs", "logs");
-        Files.createDirectories(logsDir);
+    public void testCleanOutputsDeletesFilesInTemporarySubdirectories() throws Exception {
+        Path nestedTrace = write("traces/tables/clientes.json", "{}");
+        Path nestedError = write("errors/nifi/failure.log", "failure");
+        Path nestedFlow = write("flows/archive/generated.json", "{}");
 
-        Path logFile = logsDir.resolve("test_preservation.log");
-        try (FileWriter w = new FileWriter(logFile.toFile())) {
-            w.write("Este log NO debería borrarse");
-        }
+        OutputCleaner.cleanOutputs(outputsRoot);
 
-        OutputCleaner.cleanOutputs();
-
-        assertTrue(Files.exists(logsDir));
-        assertTrue(Files.exists(logFile));
-
-        Files.deleteIfExists(logFile);
-    }
-
-    public void testCleanOutputsDeletesFilesInSubdirectories() throws Exception {
-        Path tracesTablesDir = Path.of("outputs", "traces", "tables");
-        Files.createDirectories(tracesTablesDir);
-
-        Path nestedFile = tracesTablesDir.resolve("test_nested_cleanup.json");
-        try (FileWriter w = new FileWriter(nestedFile.toFile())) {
-            w.write("{\"nested\": true}");
-        }
-
-        assertTrue(Files.exists(nestedFile));
-
-        OutputCleaner.cleanOutputs();
-
-        assertFalse(Files.exists(nestedFile));
+        assertFalse(Files.exists(nestedTrace));
+        assertFalse(Files.exists(nestedError));
+        assertFalse(Files.exists(nestedFlow));
     }
 
     public void testCleanOutputsPreservesLastExecutionIdFile() throws Exception {
-        Path tracesDir = Path.of("outputs", "traces");
-        Files.createDirectories(tracesDir);
+        Path lastIdFile = write("traces/.last_execution_id", "27");
+        Path traceFile = write("traces/temporary_trace.json", "{}");
 
-        Path lastIdFile = tracesDir.resolve(".last_execution_id");
-        Files.writeString(lastIdFile, "27");
-
-        Path traceFile = tracesDir.resolve("temporary_trace.json");
-        Files.writeString(traceFile, "{}");
-
-        OutputCleaner.cleanOutputs();
+        OutputCleaner.cleanOutputs(outputsRoot);
 
         assertTrue("El fichero .last_execution_id debe preservarse", Files.exists(lastIdFile));
         assertEquals("27", Files.readString(lastIdFile).trim());
         assertFalse("Las trazas normales deben eliminarse", Files.exists(traceFile));
+    }
+
+    public void testCleanOutputsPreservesLogsDirectory() throws Exception {
+        Path logFile = write("logs/topomigrator.log", "Este log NO deberia borrarse");
+
+        OutputCleaner.cleanOutputs(outputsRoot);
+
+        assertTrue(Files.exists(outputsRoot.resolve("logs")));
+        assertTrue(Files.exists(logFile));
+        assertEquals("Este log NO deberia borrarse", Files.readString(logFile));
+    }
+
+    public void testCleanOutputsPreservesIncrementalStateDirectory() throws Exception {
+        Path stateFile = write("state/incremental-state.json", "{\"public.clientes\":{}}");
+        Path manualStateFile = write("state/manual-note.txt", "keep");
+        Path nestedStateFile = write("state/nested/keep.json", "{}");
+        Path traceFile = write("traces/temporary_trace.json", "{}");
+
+        OutputCleaner.cleanOutputs(outputsRoot);
+
+        assertTrue(Files.exists(stateFile));
+        assertEquals("{\"public.clientes\":{}}", Files.readString(stateFile));
+        assertTrue(Files.exists(manualStateFile));
+        assertEquals("keep", Files.readString(manualStateFile));
+        assertTrue(Files.exists(nestedStateFile));
+        assertFalse(Files.exists(traceFile));
+    }
+
+    public void testProtectedDirectoriesGuardrailIncludesStateAndLogs() {
+        assertTrue("'state' debe estar en PROTECTED_DIRECTORIES",
+                OutputCleaner.PROTECTED_DIRECTORIES.contains("state"));
+        assertTrue("'logs' debe estar en PROTECTED_DIRECTORIES",
+                OutputCleaner.PROTECTED_DIRECTORIES.contains("logs"));
+    }
+
+    private Path write(String relativePath, String content) throws Exception {
+        Path file = outputsRoot.resolve(relativePath);
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, content);
+        return file;
     }
 }

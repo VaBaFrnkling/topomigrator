@@ -29,14 +29,15 @@ public class DatabaseConnectionManager {
      * @throws SQLException Si falla la conexión a la base de datos
      */
     public static Connection getConnection(ConnectionConfig config) throws SQLException {
-        if (config == null || config.getJdbcUrl() == null || config.getJdbcUrl().isEmpty()) {
+        if (config == null || config.getJdbcUrl() == null || config.getJdbcUrl().trim().isEmpty()) {
             throw new IllegalArgumentException("La configuración JDBC es nula o no contiene URL.");
         }
 
+        String jdbcUrl = config.getJdbcUrl().trim();
         String driver = config.getDriver();
-        if (driver != null && !driver.isEmpty()) {
+        if (driver != null && !driver.trim().isEmpty()) {
             try {
-                Class.forName(driver);
+                Class.forName(driver.trim());
                 log.debug("Driver de base de datos cargado correctamente: {}", driver);
             } catch (ClassNotFoundException e) {
                 log.error("No se encontró el driver especificado: {}", driver, e);
@@ -46,16 +47,16 @@ public class DatabaseConnectionManager {
         }
 
         // 2. Intentar establecer la conexión
-        log.info("Intentando conectar a la base de datos a través de JDBC: {}", config.getJdbcUrl());
+        log.info("Intentando conectar a la base de datos a traves de JDBC: {}", redactSecrets(jdbcUrl));
 
         Connection connection;
         String user = config.getUsername();
         String pass = config.getPassword();
 
         if (user != null && !user.isEmpty()) {
-            connection = DriverManager.getConnection(config.getJdbcUrl(), user, pass);
+            connection = DriverManager.getConnection(jdbcUrl, user, pass);
         } else {
-            connection = DriverManager.getConnection(config.getJdbcUrl());
+            connection = DriverManager.getConnection(jdbcUrl);
         }
 
         log.info("¡Conexión exitosa!");
@@ -77,9 +78,19 @@ public class DatabaseConnectionManager {
             if (conn != null && !conn.isClosed()) {
                 log.info("✔ Conexión a {} verificada correctamente.", label);
             }
-        } catch (SQLException e) {
-            log.error("✘ No se pudo conectar a {}: {}", label, e.getMessage());
-            throw new RuntimeException("Fallo en la prueba de conexión a " + label + ": " + e.getMessage(), e);
+        } catch (SQLException | IllegalArgumentException e) {
+            String safeMessage = redactSecrets(e.getMessage());
+            log.error("✘ No se pudo conectar a {}: {}", label, safeMessage);
+            throw new RuntimeException("Fallo en la prueba de conexión a " + label + ": " + safeMessage, e);
         }
+    }
+
+    private static String redactSecrets(String value) {
+        if (value == null) {
+            return null;
+        }
+        String redacted = value.replaceAll("(?i)(password|passwd|pwd)=([^;&\\s]+)", "$1=***");
+        redacted = redacted.replaceAll("(?i)(password|passwd|pwd):([^@\\s]+)", "$1:***");
+        return redacted.replaceAll("(?i)(//[^:/\\s]+:)([^@/\\s]+)(@)", "$1***$3");
     }
 }

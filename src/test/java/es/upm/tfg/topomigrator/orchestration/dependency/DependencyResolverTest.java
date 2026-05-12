@@ -301,4 +301,237 @@ public class DependencyResolverTest extends TestCase {
         assertEquals("pedidos", result.get(1).getName());
         assertEquals("productos", result.get(2).getName());
     }
+
+    /** Identidades fisicas schema.table conservan la direccion padre -> dependiente. */
+    public void testSchemaQualifiedDependenciesBuildParentToDependentGraph() {
+        Set<String> tables = new HashSet<>(Arrays.asList("public.clientes", "public.pedidos", "public.lineas"));
+        List<ForeignKeyDependency> deps = Arrays.asList(
+                new ForeignKeyDependency("public.clientes", "public.pedidos"),
+                new ForeignKeyDependency("public.pedidos", "public.lineas")
+        );
+
+        List<TableNode> result = resolver.resolveExecutionOrder(tables, deps);
+
+        assertEquals(3, result.size());
+        assertEquals("public.clientes", result.get(0).getName());
+        assertEquals("public.pedidos", result.get(1).getName());
+        assertEquals("public.lineas", result.get(2).getName());
+    }
+
+    /** Mayusculas y espacios alrededor se normalizan sin perder compatibilidad con claves logicas. */
+    public void testIncludedTablesAndDependenciesAreTrimmedAndLowercased() {
+        Set<String> tables = new LinkedHashSet<>(Arrays.asList(" CLIENTES ", " pedidos "));
+        List<ForeignKeyDependency> deps = Collections.singletonList(
+                new ForeignKeyDependency(" CLIENTES ", " PEDIDOS ")
+        );
+
+        List<TableNode> result = resolver.resolveExecutionOrder(tables, deps);
+
+        assertEquals(2, result.size());
+        assertEquals("clientes", result.get(0).getName());
+        assertEquals("pedidos", result.get(1).getName());
+    }
+
+    /** Ciclo triangular con identidades schema.table se rechaza antes de ejecucion. */
+    public void testSchemaQualifiedCycleDetectionTriangle() {
+        Set<String> tables = new HashSet<>(Arrays.asList("public.a", "public.b", "public.c"));
+        List<ForeignKeyDependency> deps = Arrays.asList(
+                new ForeignKeyDependency("public.a", "public.b"),
+                new ForeignKeyDependency("public.b", "public.c"),
+                new ForeignKeyDependency("public.c", "public.a")
+        );
+
+        try {
+            resolver.resolveExecutionOrder(tables, deps);
+            fail("Se esperaba CycleDetectedException para ciclo schema.table.");
+        } catch (CycleDetectedException ex) {
+            assertTrue(ex.getMessage().contains("public.a"));
+            assertTrue(ex.getMessage().contains("dependencia"));
+        }
+    }
+
+    /** Tabla incluida nula falla de forma explicita, sin NullPointerException. */
+    public void testNullIncludedTableThrowsIllegalArgumentException() {
+        Set<String> tables = new LinkedHashSet<>();
+        tables.add("clientes");
+        tables.add(null);
+
+        try {
+            resolver.resolveExecutionOrder(tables, Collections.emptyList());
+            fail("Se esperaba IllegalArgumentException por tabla nula.");
+        } catch (IllegalArgumentException ex) {
+            assertTrue(ex.getMessage().contains("tabla"));
+        }
+    }
+
+    /** Tabla incluida en blanco falla de forma explicita. */
+    public void testBlankIncludedTableThrowsIllegalArgumentException() {
+        Set<String> tables = new LinkedHashSet<>(Arrays.asList("clientes", "   "));
+
+        try {
+            resolver.resolveExecutionOrder(tables, Collections.emptyList());
+            fail("Se esperaba IllegalArgumentException por tabla en blanco.");
+        } catch (IllegalArgumentException ex) {
+            assertTrue(ex.getMessage().contains("tabla"));
+        }
+    }
+
+    /** Dependencia nula falla de forma explicita, sin NullPointerException. */
+    public void testNullDependencyThrowsIllegalArgumentException() {
+        Set<String> tables = new LinkedHashSet<>(Arrays.asList("clientes", "pedidos"));
+        List<ForeignKeyDependency> deps = new ArrayList<>();
+        deps.add(new ForeignKeyDependency("clientes", "pedidos"));
+        deps.add(null);
+
+        try {
+            resolver.resolveExecutionOrder(tables, deps);
+            fail("Se esperaba IllegalArgumentException por dependencia nula.");
+        } catch (IllegalArgumentException ex) {
+            assertTrue(ex.getMessage().contains("dependencia"));
+        }
+    }
+
+    /** Dependencias externas con schema.table se descartan sin afectar nodos incluidos. */
+    public void testSchemaQualifiedExternalDependencyIgnored() {
+        Set<String> tables = new HashSet<>(Collections.singletonList("public.pedidos"));
+        List<ForeignKeyDependency> deps = Collections.singletonList(
+                new ForeignKeyDependency("public.clientes", "public.pedidos")
+        );
+
+        List<TableNode> result = resolver.resolveExecutionOrder(tables, deps);
+
+        assertEquals(1, result.size());
+        assertEquals("public.pedidos", result.get(0).getName());
+    }
+
+    /** El mismo grafo produce el mismo orden aunque el tipo de Set de entrada cambie. */
+    public void testExecutionOrderIsIndependentFromInputSetIterationOrder() {
+        List<String> tableNames = Arrays.asList("facturas", "clientes", "lineas", "pedidos", "auditoria");
+        Set<String> hashSetTables = new HashSet<>(tableNames);
+        Set<String> linkedHashSetTables = new LinkedHashSet<>(Arrays.asList("lineas", "auditoria", "pedidos", "clientes", "facturas"));
+        Set<String> treeSetTables = new TreeSet<>(Arrays.asList("pedidos", "facturas", "auditoria", "lineas", "clientes"));
+        List<ForeignKeyDependency> deps = Arrays.asList(
+                new ForeignKeyDependency("clientes", "pedidos"),
+                new ForeignKeyDependency("pedidos", "lineas"),
+                new ForeignKeyDependency("clientes", "facturas")
+        );
+
+        List<TableNode> hashSetResult = resolver.resolveExecutionOrder(hashSetTables, deps);
+        List<TableNode> linkedHashSetResult = resolver.resolveExecutionOrder(linkedHashSetTables, deps);
+        List<TableNode> treeSetResult = resolver.resolveExecutionOrder(treeSetTables, deps);
+
+        assertEquals(names(hashSetResult), names(linkedHashSetResult));
+        assertEquals(names(hashSetResult), names(treeSetResult));
+        assertPrecedes(hashSetResult, "clientes", "pedidos");
+        assertPrecedes(hashSetResult, "pedidos", "lineas");
+        assertPrecedes(hashSetResult, "clientes", "facturas");
+        assertContainsEachTableOnce(hashSetResult, tableNames);
+    }
+
+    /** Ramas convergentes mantienen padres antes de dependientes y desempate alfabetico. */
+    public void testTopologicalOrderForConvergingBranchesIsReproducible() {
+        Set<String> tables = new HashSet<>(Arrays.asList("clientes", "productos", "pedidos", "lineas", "auditoria"));
+        List<ForeignKeyDependency> deps = Arrays.asList(
+                new ForeignKeyDependency("clientes", "pedidos"),
+                new ForeignKeyDependency("pedidos", "lineas"),
+                new ForeignKeyDependency("productos", "lineas")
+        );
+
+        List<TableNode> result = resolver.resolveExecutionOrder(tables, deps);
+
+        assertEquals(Arrays.asList("auditoria", "clientes", "pedidos", "productos", "lineas"), names(result));
+        assertPrecedes(result, "clientes", "pedidos");
+        assertPrecedes(result, "pedidos", "lineas");
+        assertPrecedes(result, "productos", "lineas");
+        assertContainsEachTableOnce(result, new ArrayList<>(tables));
+    }
+
+    /** Dependencias duplicadas, incluso si solo son equivalentes tras normalizar, no cambian el orden. */
+    public void testDuplicateDependenciesEquivalentAfterNormalizationDoNotChangeTopologicalOrder() {
+        Set<String> tables = new HashSet<>(Arrays.asList("clientes", "pedidos", "lineas", "auditoria"));
+        List<ForeignKeyDependency> cleanDeps = Arrays.asList(
+                new ForeignKeyDependency("clientes", "pedidos"),
+                new ForeignKeyDependency("pedidos", "lineas")
+        );
+        List<ForeignKeyDependency> duplicatedDeps = Arrays.asList(
+                new ForeignKeyDependency("clientes", "pedidos"),
+                new ForeignKeyDependency(" CLIENTES ", " PEDIDOS "),
+                new ForeignKeyDependency("pedidos", "lineas"),
+                new ForeignKeyDependency(" PEDIDOS ", " LINEAS ")
+        );
+
+        List<TableNode> cleanResult = resolver.resolveExecutionOrder(tables, cleanDeps);
+        List<TableNode> duplicatedResult = resolver.resolveExecutionOrder(tables, duplicatedDeps);
+
+        assertEquals(names(cleanResult), names(duplicatedResult));
+        assertEquals(Arrays.asList("auditoria", "clientes", "pedidos", "lineas"), names(duplicatedResult));
+    }
+
+    /** Dependencias externas entrantes o salientes se ignoran sin alterar el orden. */
+    public void testExternalDependenciesDoNotChangeTopologicalOrder() {
+        Set<String> tables = new HashSet<>(Arrays.asList("clientes", "pedidos", "lineas", "auditoria"));
+        List<ForeignKeyDependency> cleanDeps = Arrays.asList(
+                new ForeignKeyDependency("clientes", "pedidos"),
+                new ForeignKeyDependency("pedidos", "lineas")
+        );
+        List<ForeignKeyDependency> externalDeps = Arrays.asList(
+                new ForeignKeyDependency("clientes", "pedidos"),
+                new ForeignKeyDependency("pedidos", "lineas"),
+                new ForeignKeyDependency("catalogos", "pedidos"),
+                new ForeignKeyDependency("pedidos", "externa")
+        );
+
+        List<TableNode> cleanResult = resolver.resolveExecutionOrder(tables, cleanDeps);
+        List<TableNode> externalResult = resolver.resolveExecutionOrder(tables, externalDeps);
+
+        assertEquals(names(cleanResult), names(externalResult));
+        assertEquals(Arrays.asList("auditoria", "clientes", "pedidos", "lineas"), names(externalResult));
+    }
+
+    /** Claves logicas y schema.table con espacios y mayusculas conservan orden canonico. */
+    public void testTopologicalOrderPreservesNormalizedLogicalAndPhysicalIdentifiers() {
+        Locale previousLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+            Set<String> tables = new LinkedHashSet<>(Arrays.asList(" PUBLIC.PEDIDOS ", " ITEMS ", " PUBLIC.LINEAS "));
+            List<ForeignKeyDependency> deps = Arrays.asList(
+                    new ForeignKeyDependency(" ITEMS ", " PUBLIC.PEDIDOS "),
+                    new ForeignKeyDependency(" PUBLIC.PEDIDOS ", " PUBLIC.LINEAS ")
+            );
+
+            List<TableNode> result = resolver.resolveExecutionOrder(tables, deps);
+
+            assertEquals(Arrays.asList("items", "public.pedidos", "public.lineas"), names(result));
+            assertPrecedes(result, "items", "public.pedidos");
+            assertPrecedes(result, "public.pedidos", "public.lineas");
+        } finally {
+            Locale.setDefault(previousLocale);
+        }
+    }
+
+    private List<String> names(List<TableNode> nodes) {
+        List<String> names = new ArrayList<>();
+        for (TableNode node : nodes) {
+            names.add(node.getName());
+        }
+        return names;
+    }
+
+    private void assertPrecedes(List<TableNode> result, String parent, String dependent) {
+        List<String> names = names(result);
+        int parentIndex = names.indexOf(parent);
+        int dependentIndex = names.indexOf(dependent);
+        assertTrue("No se encontro tabla padre en resultado: " + parent, parentIndex >= 0);
+        assertTrue("No se encontro tabla dependiente en resultado: " + dependent, dependentIndex >= 0);
+        assertTrue("La tabla padre debe preceder a la dependiente: " + parent + " -> " + dependent,
+                parentIndex < dependentIndex);
+    }
+
+    private void assertContainsEachTableOnce(List<TableNode> result, List<String> expectedTables) {
+        List<String> resultNames = names(result);
+        Set<String> uniqueNames = new HashSet<>(resultNames);
+        assertEquals("El resultado no debe contener tablas duplicadas.", resultNames.size(), uniqueNames.size());
+        assertEquals("El resultado debe contener exactamente todas las tablas activas.",
+                new HashSet<>(expectedTables), uniqueNames);
+    }
 }

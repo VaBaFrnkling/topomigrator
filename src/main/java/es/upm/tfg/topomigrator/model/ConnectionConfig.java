@@ -6,6 +6,8 @@ package es.upm.tfg.topomigrator.model;
 public class ConnectionConfig {
 
     private String driver;
+    private String driverLocation;
+    private String databaseType;
     private String jdbcUrl;
     private String username;
     private String password;
@@ -16,6 +18,22 @@ public class ConnectionConfig {
 
     public void setDriver(String driver) {
         this.driver = driver;
+    }
+
+    public String getDriverLocation() {
+        return driverLocation;
+    }
+
+    public void setDriverLocation(String driverLocation) {
+        this.driverLocation = driverLocation;
+    }
+
+    public String getDatabaseType() {
+        return databaseType;
+    }
+
+    public void setDatabaseType(String databaseType) {
+        this.databaseType = databaseType;
     }
 
     public String getJdbcUrl() {
@@ -44,6 +62,7 @@ public class ConnectionConfig {
 
     @Override
     public String toString() {
-        return "ConnectionConfig{jdbcUrl='" + jdbcUrl + "', username='" + username + "'}";
+        return "ConnectionConfig{jdbcUrl='" + jdbcUrl + "', username='" + username
+                + "', driver='" + driver + "', databaseType='" + databaseType + "'}";
     }
 }

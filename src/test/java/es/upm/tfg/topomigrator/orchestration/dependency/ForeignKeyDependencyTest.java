@@ -2,6 +2,8 @@ package es.upm.tfg.topomigrator.orchestration.dependency;
 
 import junit.framework.TestCase;
 
+import java.util.Locale;
+
 /**
  * Tests exhaustivos para el modelo {@link ForeignKeyDependency}.
  * Cubre: constructor (validación y normalización), getters,
@@ -89,6 +91,21 @@ public class ForeignKeyDependencyTest extends TestCase {
         ForeignKeyDependency dep = new ForeignKeyDependency("clientes", "pedidos");
         assertEquals("clientes", dep.getParentTable());
         assertEquals("pedidos", dep.getDependentTable());
+    }
+
+    /** La normalizacion no depende del locale por defecto de la JVM. */
+    public void testNamesNormalizedWithRootLocale() {
+        Locale previousLocale = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.forLanguageTag("tr-TR"));
+
+            ForeignKeyDependency dep = new ForeignKeyDependency("ITEMS", "INVOICE_LINES");
+
+            assertEquals("items", dep.getParentTable());
+            assertEquals("invoice_lines", dep.getDependentTable());
+        } finally {
+            Locale.setDefault(previousLocale);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

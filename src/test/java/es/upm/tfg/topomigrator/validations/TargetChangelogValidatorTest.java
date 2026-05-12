@@ -56,6 +56,10 @@ public class TargetChangelogValidatorTest extends TestCase {
      * Construye un contrato mínimo con una sola tabla cuyo target.table es el nombre dado.
      */
     private MigrationContract buildContractWithTargetTable(String targetTableName) {
+        return buildContractWithTarget("public", targetTableName);
+    }
+
+    private MigrationContract buildContractWithTarget(String targetSchemaName, String targetTableName) {
         MigrationContract c = new MigrationContract();
         MigrationInfo mi = new MigrationInfo();
         mi.setName("test");
@@ -69,7 +73,7 @@ public class TargetChangelogValidatorTest extends TestCase {
         t.setSource(source);
 
         TableRef target = new TableRef();
-        target.setSchema("public");
+        target.setSchema(targetSchemaName);
         target.setTable(targetTableName);
         t.setTarget(target);
 
@@ -121,6 +125,72 @@ public class TargetChangelogValidatorTest extends TestCase {
         }
     }
 
+    public void testActiveTableWithNullTargetThrows() {
+        MigrationContract c = buildContractWithTargetTable("tabla_sin_target");
+        c.getTables().get("tabla_sin_target").setTarget(null);
+
+        try {
+            TargetChangelogValidator.validate(c);
+            fail("Se esperaba InvalidChangelogException por target nulo.");
+        } catch (InvalidChangelogException e) {
+            assertTrue(e.getMessage().contains("tabla_sin_target"));
+            assertTrue(e.getMessage().contains("destino"));
+        }
+    }
+
+    public void testActiveTableWithBlankTargetSchemaThrows() {
+        MigrationContract c = buildContractWithTarget(" ", "tabla_sin_schema");
+
+        try {
+            TargetChangelogValidator.validate(c);
+            fail("Se esperaba InvalidChangelogException por target.schema vacio.");
+        } catch (InvalidChangelogException e) {
+            assertTrue(e.getMessage().contains("target.schema"));
+            assertTrue(e.getMessage().contains("target.table"));
+        }
+    }
+
+    public void testActiveTableWithNullTargetSchemaThrows() {
+        MigrationContract c = buildContractWithTarget(null, "tabla_sin_schema_nulo");
+
+        try {
+            TargetChangelogValidator.validate(c);
+            fail("Se esperaba InvalidChangelogException por target.schema nulo.");
+        } catch (InvalidChangelogException e) {
+            assertTrue(e.getMessage().contains("tabla_sin_schema_nulo"));
+            assertTrue(e.getMessage().contains("target.schema"));
+            assertTrue(e.getMessage().contains("target.table"));
+        }
+    }
+
+    public void testActiveTableWithNullTargetTableThrows() {
+        MigrationContract c = buildContractWithTargetTable("tabla_sin_target_table");
+        c.getTables().get("tabla_sin_target_table").getTarget().setTable(null);
+
+        try {
+            TargetChangelogValidator.validate(c);
+            fail("Se esperaba InvalidChangelogException por target.table nulo.");
+        } catch (InvalidChangelogException e) {
+            assertTrue(e.getMessage().contains("tabla_sin_target_table"));
+            assertTrue(e.getMessage().contains("target.schema"));
+            assertTrue(e.getMessage().contains("target.table"));
+        }
+    }
+
+    public void testActiveTableWithBlankTargetTableThrows() {
+        MigrationContract c = buildContractWithTargetTable("tabla_sin_target_table");
+        c.getTables().get("tabla_sin_target_table").getTarget().setTable(" ");
+
+        try {
+            TargetChangelogValidator.validate(c);
+            fail("Se esperaba InvalidChangelogException por target.table vacio.");
+        } catch (InvalidChangelogException e) {
+            assertTrue(e.getMessage().contains("tabla_sin_target_table"));
+            assertTrue(e.getMessage().contains("target.schema"));
+            assertTrue(e.getMessage().contains("target.table"));
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //  2. ARCHIVO DE CHANGELOG AUSENTE
     // ═══════════════════════════════════════════════════════════════════════════
@@ -145,8 +215,9 @@ public class TargetChangelogValidatorTest extends TestCase {
     /** Prueba que un changelog válido con convención directa (tabla.yaml) pasa correctamente. */
     public void testValidChangelogDirectConventionPasses() throws Exception {
         String tableName = "test_direct_conv";
-        writeChangelogFile(tableName + ".yaml",
+        writeChangelogFile("public." + tableName + ".yaml",
                 "databaseChangeLog:\n  - changeSet:\n      id: 1\n      author: test\n      changes:\n        - createTable:\n            tableName: " + tableName + "\n"
+                        + "            schemaName: public\n"
         );
 
         MigrationContract c = buildContractWithTargetTable(tableName);
@@ -161,8 +232,9 @@ public class TargetChangelogValidatorTest extends TestCase {
     /** Prueba que un changelog válido con convención prefijada (changelog-tabla.yaml) pasa. */
     public void testValidChangelogPrefixConventionPasses() throws Exception {
         String tableName = "test_prefix_conv";
-        writeChangelogFile("changelog-" + tableName + ".yaml",
+        writeChangelogFile("public." + tableName + ".yaml",
                 "databaseChangeLog:\n  - changeSet:\n      id: 1\n      author: test\n      changes:\n        - createTable:\n            tableName: " + tableName + "\n"
+                        + "            schemaName: public\n"
         );
 
         MigrationContract c = buildContractWithTargetTable(tableName);
@@ -176,7 +248,7 @@ public class TargetChangelogValidatorTest extends TestCase {
     /** Prueba que un archivo que no es YAML válido lanza excepción. */
     public void testInvalidYamlContentThrows() throws Exception {
         String tableName = "test_bad_yaml";
-        writeChangelogFile(tableName + ".yaml",
+        writeChangelogFile("public." + tableName + ".yaml",
                 "esto: no: es: yaml: valido:\n  [[invalido\n"
         );
 
@@ -196,7 +268,7 @@ public class TargetChangelogValidatorTest extends TestCase {
     /** Prueba que un YAML sin la clave raíz 'databaseChangeLog' lanza excepción. */
     public void testYamlWithoutDatabaseChangeLogRootThrows() throws Exception {
         String tableName = "test_no_root";
-        writeChangelogFile(tableName + ".yaml",
+        writeChangelogFile("public." + tableName + ".yaml",
                 "someOtherKey:\n  - id: 1\n    author: test\n"
         );
 
@@ -216,7 +288,7 @@ public class TargetChangelogValidatorTest extends TestCase {
     /** Prueba que un YAML que es solo un string (no un Map) lanza excepción. */
     public void testYamlScalarContentThrows() throws Exception {
         String tableName = "test_scalar";
-        writeChangelogFile(tableName + ".yaml",
+        writeChangelogFile("public." + tableName + ".yaml",
                 "esto es solo una cadena de texto plano sin estructura YAML de mapa\n"
         );
 
@@ -236,7 +308,7 @@ public class TargetChangelogValidatorTest extends TestCase {
     /** Prueba que un archivo changelog vacío lanza excepción. */
     public void testEmptyChangelogFileThrows() throws Exception {
         String tableName = "test_empty_file";
-        writeChangelogFile(tableName + ".yaml", "");
+        writeChangelogFile("public." + tableName + ".yaml", "");
 
         MigrationContract c = buildContractWithTargetTable(tableName);
         try {
@@ -260,12 +332,12 @@ public class TargetChangelogValidatorTest extends TestCase {
             String table1 = "test_multi_a";
             String table2 = "test_multi_b";
 
-            file1 = writeChangelogFile(table1 + ".yaml",
-                    "databaseChangeLog:\n  - changeSet:\n      id: 1\n      author: t\n      changes: []\n");
+            file1 = writeChangelogFile("public." + table1 + ".yaml",
+                    "databaseChangeLog:\n  - changeSet:\n      id: 1\n      author: t\n      changes:\n        - createTable:\n            schemaName: public\n            tableName: " + table1 + "\n");
             // Reseteamos tempFileCreated para poder crear un segundo
             tempFileCreated = null;
-            file2 = writeChangelogFile(table2 + ".yaml",
-                    "databaseChangeLog:\n  - changeSet:\n      id: 1\n      author: t\n      changes: []\n");
+            file2 = writeChangelogFile("public." + table2 + ".yaml",
+                    "databaseChangeLog:\n  - changeSet:\n      id: 1\n      author: t\n      changes:\n        - createTable:\n            schemaName: public\n            tableName: " + table2 + "\n");
 
             MigrationContract c = buildContractWithTargetTable(table1);
 
@@ -302,8 +374,8 @@ public class TargetChangelogValidatorTest extends TestCase {
             String tableOk = "test_multi_ok";
             String tableBad = "test_multi_missing";
 
-            file1 = writeChangelogFile(tableOk + ".yaml",
-                    "databaseChangeLog:\n  - changeSet:\n      id: 1\n      author: t\n      changes: []\n");
+            file1 = writeChangelogFile("public." + tableOk + ".yaml",
+                    "databaseChangeLog:\n  - changeSet:\n      id: 1\n      author: t\n      changes:\n        - createTable:\n            schemaName: public\n            tableName: " + tableOk + "\n");
 
             MigrationContract c = buildContractWithTargetTable(tableOk);
 
@@ -342,9 +414,9 @@ public class TargetChangelogValidatorTest extends TestCase {
      * y el contract.yaml del proyecto pasan correctamente TargetChangelogValidator.
      */
     public void testRealProjectChangelogPasses() {
-        // El contrato real del proyecto referencia target.table = "nombre_tabla"
-        // y existe changelogs/tables/nombre_tabla.yaml
-        MigrationContract c = buildContractWithTargetTable("nombre_tabla");
+        // El contrato real del proyecto referencia target.schema = "nombre_esquema"
+        // y target.table = "nombre_tabla".
+        MigrationContract c = buildContractWithTarget("nombre_esquema", "nombre_tabla");
         TargetChangelogValidator.validate(c);
     }
 }

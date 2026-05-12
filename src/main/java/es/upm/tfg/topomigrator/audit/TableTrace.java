@@ -14,8 +14,6 @@ public class TableTrace {
     public long recordsProcessed;
     public Timing timing;
     public Map<String, Object> filters;
-    public Map<String, Object> transformations;
-    public Map<String, Object> validations;
     public List<String> errors;
     public AuditMetrics auditMetrics;
 
@@ -31,7 +29,9 @@ public class TableTrace {
 
     public static class IncrementalInfo {
         public String column;
+        public String previousValue;
         public String lastProcessedValue;
+        public boolean stateUpdated;
     }
 
     public static class AuditMetrics {

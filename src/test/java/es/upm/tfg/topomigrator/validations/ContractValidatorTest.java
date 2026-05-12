@@ -8,8 +8,9 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -86,6 +87,17 @@ public class ContractValidatorTest extends TestCase {
         t.setTarget(buildTableRef("public", "destino"));
         t.setMigrationType("full");
         t.setEnabled(true);
+        return t;
+    }
+
+    /** Construye una TableMigration incremental minima valida. */
+    private TableMigration buildIncrementalTable() {
+        TableMigration t = buildMinimalTable();
+        t.setMigrationType("incremental");
+        IncrementalConfig ic = new IncrementalConfig();
+        ic.setColumn("fecha");
+        ic.setStartValue("2026-01-01T00:00:00");
+        t.setIncrementalConfig(ic);
         return t;
     }
 
@@ -465,6 +477,90 @@ public class ContractValidatorTest extends TestCase {
         }
     }
 
+    /** Prueba que incrementalConfig.column nulo lanza excepcion. */
+    public void testIncrementalWithoutColumnThrows() {
+        MigrationContract c = buildValidContract();
+        TableMigration t = buildIncrementalTable();
+        t.getIncrementalConfig().setColumn(null);
+        c.getTables().put("tabla_inc_sin_columna", t);
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException por incrementalConfig.column nulo.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("incrementalConfig.column"));
+        }
+    }
+
+    /** Prueba que incrementalConfig.startValue vacio lanza excepcion. */
+    public void testIncrementalWithEmptyStartValueThrows() {
+        MigrationContract c = buildValidContract();
+        TableMigration t = buildIncrementalTable();
+        t.getIncrementalConfig().setStartValue("   ");
+        c.getTables().put("tabla_inc_sin_inicio", t);
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException por incrementalConfig.startValue vacio.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("incrementalConfig.startValue"));
+        }
+    }
+
+    /** Prueba que batchSize no positivo lanza excepcion. */
+    public void testIncrementalWithNonPositiveBatchSizeThrows() {
+        MigrationContract c = buildValidContract();
+        TableMigration t = buildIncrementalTable();
+        t.getIncrementalConfig().setBatchSize(0);
+        c.getTables().put("tabla_inc_batch_cero", t);
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException por incrementalConfig.batchSize no positivo.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("incrementalConfig.batchSize"));
+        }
+    }
+
+    /** Prueba que loadStrategy no permitida lanza excepcion. */
+    public void testIncrementalWithInvalidLoadStrategyThrows() {
+        MigrationContract c = buildValidContract();
+        TableMigration t = buildIncrementalTable();
+        t.getIncrementalConfig().setLoadStrategy("merge");
+        c.getTables().put("tabla_inc_strategy_invalida", t);
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException por incrementalConfig.loadStrategy invalida.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("incrementalConfig.loadStrategy"));
+        }
+    }
+
+    /** Prueba que idempotencyKeyColumns vacio lanza excepcion si se declara. */
+    public void testIncrementalWithEmptyIdempotencyKeyColumnsThrows() {
+        MigrationContract c = buildValidContract();
+        TableMigration t = buildIncrementalTable();
+        t.getIncrementalConfig().setIdempotencyKeyColumns(Collections.emptyList());
+        c.getTables().put("tabla_inc_keys_vacias", t);
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException por idempotencyKeyColumns vacio.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("idempotencyKeyColumns"));
+        }
+    }
+
+    /** Prueba que idempotencyKeyColumns con columna vacia lanza excepcion. */
+    public void testIncrementalWithBlankIdempotencyKeyColumnThrows() {
+        MigrationContract c = buildValidContract();
+        TableMigration t = buildIncrementalTable();
+        t.getIncrementalConfig().setIdempotencyKeyColumns(Arrays.asList("id", " "));
+        c.getTables().put("tabla_inc_key_blanca", t);
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException por columna vacia en idempotencyKeyColumns.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("idempotencyKeyColumns"));
+        }
+    }
+
     /** Prueba que "full" con incrementalConfig (innecesaria) NO lanza excepción. */
     public void testFullWithIncrementalConfigPasses() {
         MigrationContract c = buildValidContract();
@@ -472,6 +568,7 @@ public class ContractValidatorTest extends TestCase {
         t.setMigrationType("full");
         IncrementalConfig ic = new IncrementalConfig();
         ic.setColumn("id");
+        ic.setStartValue("2026-01-01T00:00:00");
         t.setIncrementalConfig(ic);
         c.getTables().put("tabla_full_con_inc", t);
         // No debería fallar: se ignora el bloque incremental si el tipo es full
@@ -494,6 +591,7 @@ public class ContractValidatorTest extends TestCase {
         t.setMigrationType("InCreMenTal");
         IncrementalConfig ic = new IncrementalConfig();
         ic.setColumn("id");
+        ic.setStartValue("2026-01-01T00:00:00");
         t.setIncrementalConfig(ic);
         c.getTables().put("tabla_mixcase", t);
         ContractValidator.validate(c, validOrderFile);
@@ -508,6 +606,69 @@ public class ContractValidatorTest extends TestCase {
         ContractValidator.validate(c, validOrderFile);
     }
 
+    /** Prueba que una tabla inactiva malformada no bloquea la validacion del contrato. */
+    public void testInactiveMalformedTableIsIgnoredByTableLevelValidation() {
+        MigrationContract c = buildValidContract();
+        TableMigration inactive = new TableMigration();
+        inactive.setEnabled(false);
+        inactive.setSource(null);
+        inactive.setTarget(null);
+        inactive.setMigrationType("unsupported");
+
+        c.getTables().put("tabla_inactiva_rota", inactive);
+
+        ContractValidator.validate(c, validOrderFile);
+    }
+
+    /** Prueba que un contrato sin tablas activas falla con mensaje explicito. */
+    public void testAllInactiveTablesThrowNoActiveTables() {
+        MigrationContract c = buildValidContract();
+        for (TableMigration table : c.getTables().values()) {
+            table.setEnabled(false);
+        }
+
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException al no haber tablas activas.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("tablas activas"));
+        }
+    }
+
+    /** Prueba que omitir enabled equivale a tabla inactiva por el boolean primitivo. */
+    public void testOmittedEnabledDefaultsToInactiveAndThrowsWhenNoActiveTables() {
+        MigrationContract c = buildValidContract();
+        TableMigration omittedEnabled = new TableMigration();
+        omittedEnabled.setSource(buildTableRef("public", "origen"));
+        omittedEnabled.setTarget(buildTableRef("public", "destino"));
+        omittedEnabled.setMigrationType("full");
+
+        Map<String, TableMigration> tables = new HashMap<>();
+        tables.put("tabla_sin_enabled", omittedEnabled);
+        c.setTables(tables);
+
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException porque enabled omitido/default false no es activo.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("tablas activas"));
+        }
+    }
+
+    /** Prueba que el contrato filtrado para downstream contiene solo tablas activas. */
+    public void testRetainEnabledTablesExcludesInactiveTablesForDownstreamFlow() {
+        MigrationContract c = buildValidContract();
+        TableMigration inactive = buildMinimalTable();
+        inactive.setEnabled(false);
+        c.getTables().put("tabla_inactiva", inactive);
+
+        MigrationContract filtered = es.upm.tfg.topomigrator.util.MigrationContractUtils.retainEnabledTables(c);
+
+        assertTrue(filtered.getTables().containsKey("tabla_demo"));
+        assertFalse(filtered.getTables().containsKey("tabla_inactiva"));
+        assertEquals(1, filtered.getTables().size());
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //  12. HAPPY PATH COMPLETO — INTEGRACIÓN LIGERA CON FICHERO REAL
     // ═══════════════════════════════════════════════════════════════════════════
@@ -519,7 +680,21 @@ public class ContractValidatorTest extends TestCase {
     public void testRealContractFilePasses() {
         try {
             Path contractPath = Path.of("configs/contract.yaml");
-            es.upm.tfg.topomigrator.config.ContractLoader loader = new es.upm.tfg.topomigrator.config.ContractLoader();
+            Path datasourcePath = writeTempYaml("source:\n" +
+                    "  driver: org.postgresql.Driver\n" +
+                    "  driverLocation: /opt/nifi/drivers/postgresql-42.7.10.jar\n" +
+                    "  databaseType: PostgreSQL\n" +
+                    "  jdbcUrl: jdbc:postgresql://localhost:5432/source_test\n" +
+                    "  username: source_user\n" +
+                    "  password: source_password\n" +
+                    "target:\n" +
+                    "  driver: org.postgresql.Driver\n" +
+                    "  driverLocation: /opt/nifi/drivers/postgresql-42.7.10.jar\n" +
+                    "  databaseType: PostgreSQL\n" +
+                    "  jdbcUrl: jdbc:postgresql://localhost:5432/target_test\n" +
+                    "  username: target_user\n" +
+                    "  password: target_password\n");
+            es.upm.tfg.topomigrator.config.ContractLoader loader = new es.upm.tfg.topomigrator.config.ContractLoader(datasourcePath);
             MigrationContract contract = loader.load(contractPath);
 
             assertNotNull("El contrato parseado no debería ser nulo", contract);

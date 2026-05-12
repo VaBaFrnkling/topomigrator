@@ -13,11 +13,17 @@ tables:
       schema: "nombre_esquema"
       table: "nombre_tabla"
     enabled: true
-    migrationType: "full"
+    migrationType: "incremental" # valores permitidos: full | incremental
     incrementalConfig:
-      column: "nombre_columna"
-      type: "tipo_de_columna"
-      startValue: "valor_inicial"
+      column: "nombre_columna_incremental"
+      type: "timestamp"
+      startValue: "2026-01-01T00:00:00"
       batchSize: 1000
+      # Estrategia por defecto recomendada para evitar duplicados en relanzamientos.
+      # Si se omite idempotencyKeyColumns, TopoMigrator intentará inferir la PK de destino.
+      # Si no hay PK ni idempotencyKeyColumns, la tabla falla para evitar un INSERT no idempotente.
+      loadStrategy: "upsert" # valores permitidos: upsert | append | append_only
+      idempotencyKeyColumns:
+        - "id"
     filters:
-      where: "condicion SQL"
+      where: "condicion SQL opcional"

@@ -65,6 +65,34 @@ public class DatabaseConnectionManagerTest extends TestCase {
     //  VALIDACIÓN DE DRIVER
     // ═══════════════════════════════════════════════════════════════════
 
+    /** testConnection envuelve errores de configuracion con la etiqueta sin exponer password. */
+    public void testTestConnectionWrapsInvalidConfigWithLabelAndNoPassword() {
+        ConnectionConfig config = new ConnectionConfig();
+        config.setJdbcUrl(" ");
+        config.setPassword("secret_password");
+        try {
+            DatabaseConnectionManager.testConnection(config, "Base de Datos Origen");
+            fail("Se esperaba RuntimeException por URL JDBC vacia.");
+        } catch (RuntimeException e) {
+            assertTrue(e.getMessage().contains("Base de Datos Origen"));
+            assertFalse(e.getMessage().contains("secret_password"));
+        }
+    }
+
+    /** testConnection redacta secretos incluidos accidentalmente en la URL JDBC. */
+    public void testTestConnectionRedactsPasswordFromJdbcUrlInDiagnostics() {
+        ConnectionConfig config = new ConnectionConfig();
+        config.setJdbcUrl(" jdbc:fake://localhost/test?password=secret_password ");
+        try {
+            DatabaseConnectionManager.testConnection(config, "Base de Datos Origen");
+            fail("Se esperaba RuntimeException por URL JDBC sin driver.");
+        } catch (RuntimeException e) {
+            assertTrue(e.getMessage().contains("Base de Datos Origen"));
+            assertFalse(e.getMessage().contains("secret_password"));
+            assertTrue(e.getMessage().contains("password=***"));
+        }
+    }
+
     /** Un driver inexistente lanza SQLException con cause ClassNotFoundException. */
     public void testInvalidDriverThrowsSQLException() {
         ConnectionConfig config = new ConnectionConfig();

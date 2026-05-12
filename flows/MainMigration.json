@@ -24,7 +24,7 @@
           {
             "identifier": "8745312b-019d-1000-327d-6ed304f26169",
             "instanceIdentifier": "6168bbfe-2715-38f0-2e40-b2ab30a07f9d",
-            "name": "LogAttribute",
+            "name": "NiFiFailure_ExecuteSQLRecord",
             "comments": "",
             "position": {
               "x": -1400.0,
@@ -38,13 +38,13 @@
             },
             "properties": {
               "Log FlowFile Properties": "true",
-              "Log Level": "info",
+              "Log Level": "error",
               "Attributes to Ignore": null,
               "Attributes to Log": null,
               "Attributes to Ignore Regular Expression": null,
               "Output Format": "Line per Attribute",
               "Log Payload": "false",
-              "Log Prefix": "ExecuteSQLRecord",
+              "Log Prefix": "NiFiFailure_ExecuteSQLRecord",
               "Character Set": "UTF-8",
               "Attributes to Log Regular Expression": ".*"
             },
@@ -143,7 +143,7 @@
           {
             "identifier": "874844de-019d-1000-1bc6-63124e7e5366",
             "instanceIdentifier": "75f70566-da41-3c92-6221-ad8b21dcc5d4",
-            "name": "LogAttribute",
+            "name": "NiFiFailure_PutDatabaseRecord",
             "comments": "",
             "position": {
               "x": -64.0,
@@ -163,7 +163,7 @@
               "Attributes to Ignore Regular Expression": null,
               "Output Format": "Single Line",
               "Log Payload": "false",
-              "Log Prefix": "PutDatabaseRecord",
+              "Log Prefix": "NiFiFailure_PutDatabaseRecord",
               "Character Set": "UTF-8",
               "Attributes to Log Regular Expression": ".*"
             },
@@ -262,7 +262,7 @@
           {
             "identifier": "9d3ca494-019d-1000-5e84-ca2f45c7d67f",
             "instanceIdentifier": "da854f54-1b1d-345e-8471-5fc4bba0f53d",
-            "name": "LogAttribute",
+            "name": "NiFiSuccess_PutDatabaseRecord",
             "comments": "",
             "position": {
               "x": -64.0,
@@ -282,7 +282,7 @@
               "Attributes to Ignore Regular Expression": null,
               "Output Format": "Single Line",
               "Log Payload": "false",
-              "Log Prefix": "PutDatabaseRecord",
+              "Log Prefix": "NiFiSuccess_PutDatabaseRecord",
               "Character Set": "UTF-8",
               "Attributes to Log Regular Expression": ".*"
             },
@@ -402,12 +402,12 @@
               "Default Decimal Scale": "0",
               "SQL Post-Query": null,
               "Fetch Size": "0",
-              "Output Batch Size": "0",
+              "Output Batch Size": "1000",
               "Use Avro Logical Types": "false",
               "Record Writer": "087b5e11-f83b-31ef-9c5b-d54f861899d3",
               "SQL Pre-Query": null,
               "Default Decimal Precision": "10",
-              "Max Rows Per FlowFile": "0"
+              "Max Rows Per FlowFile": "1000"
             },
             "propertyDescriptors": {
               "Set Auto Commit": {
@@ -556,7 +556,7 @@
               "Database Name": null,
               "Allow Multiple SQL Statements": "false",
               "Rollback On Failure": "true",
-              "Update Keys": null,
+              "Update Keys": "##UPDATE_KEYS##",
               "Field Containing SQL": null,
               "Database Dialect Service": null,
               "Data Record Path": null,
@@ -565,10 +565,10 @@
               "Column Name Translation Strategy": "REMOVE_UNDERSCORE",
               "Binary String Format": "UTF-8",
               "Unmatched Column Behavior": "Fail on Unmatched Columns",
-              "Database Type": "PostgreSQL",
+              "Database Type": "#{target.db.type}",
               "Post-Processing SQL": null,
               "Translate Field Names": "true",
-              "Statement Type": "INSERT",
+              "Statement Type": "##STATEMENT_TYPE##",
               "Pre-Processing SQL": null,
               "Table Schema Cache Size": "100",
               "Maximum Batch Size": "1000"
@@ -899,7 +899,7 @@
           {
             "identifier": "6df244bf-69d5-335e-80d9-1b366dc3ace4",
             "instanceIdentifier": "87486a1d-019d-1000-e79e-204cbdad0961",
-            "name": "",
+            "name": "failure.PutDatabaseRecord",
             "source": {
               "id": "336e7e8b-3252-3684-abbf-91772c79cb7e",
               "type": "PROCESSOR",
@@ -912,7 +912,7 @@
               "id": "874844de-019d-1000-1bc6-63124e7e5366",
               "type": "PROCESSOR",
               "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "LogAttribute",
+              "name": "NiFiFailure_PutDatabaseRecord",
               "comments": "",
               "instanceIdentifier": "75f70566-da41-3c92-6221-ad8b21dcc5d4"
             },
@@ -971,7 +971,7 @@
           {
             "identifier": "a44e5b54-5358-3c4c-9f15-132487814b11",
             "instanceIdentifier": "874555d6-019d-1000-860f-ea66014baf5f",
-            "name": "",
+            "name": "failure.ExecuteSQLRecord",
             "source": {
               "id": "94ac8ede-eab5-35a4-be62-0a712834c8a0",
               "type": "PROCESSOR",
@@ -984,7 +984,7 @@
               "id": "8745312b-019d-1000-327d-6ed304f26169",
               "type": "PROCESSOR",
               "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "LogAttribute",
+              "name": "NiFiFailure_ExecuteSQLRecord",
               "comments": "",
               "instanceIdentifier": "6168bbfe-2715-38f0-2e40-b2ab30a07f9d"
             },
@@ -1020,7 +1020,7 @@
               "id": "9d3ca494-019d-1000-5e84-ca2f45c7d67f",
               "type": "PROCESSOR",
               "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "LogAttribute",
+              "name": "NiFiSuccess_PutDatabaseRecord",
               "comments": "",
               "instanceIdentifier": "da854f54-1b1d-345e-8471-5fc4bba0f53d"
             },
@@ -1350,9 +1350,9 @@
         },
         "properties": {
           "Maximum Idle Connections": "8",
-          "Database Driver Locations": "/opt/nifi/drivers/postgresql-42.7.10.jar",
+          "Database Driver Locations": "#{source.db.driver.location}",
           "Max Wait Time": "500 millis",
-          "Database Driver Class Name": "org.postgresql.Driver",
+          "Database Driver Class Name": "#{source.db.driver}",
           "Minimum Idle Connections": "0",
           "Kerberos User Service": null,
           "Max Total Connections": "8",
@@ -1524,9 +1524,9 @@
         },
         "properties": {
           "Maximum Idle Connections": "8",
-          "Database Driver Locations": "/opt/nifi/drivers/postgresql-42.7.10.jar",
+          "Database Driver Locations": "#{target.db.driver.location}",
           "Max Wait Time": "500 millis",
-          "Database Driver Class Name": "org.postgresql.Driver",
+          "Database Driver Class Name": "#{target.db.driver}",
           "Minimum Idle Connections": "0",
           "Kerberos User Service": null,
           "Max Total Connections": "8",
@@ -1926,6 +1926,41 @@
           "sensitive": true,
           "provided": false,
           "value": "##SOURCE_DB_PASSWORD##"
+        },
+        {
+          "name": "source.db.driver",
+          "description": "",
+          "sensitive": false,
+          "provided": false,
+          "value": "##SOURCE_DB_DRIVER##"
+        },
+        {
+          "name": "source.db.driver.location",
+          "description": "",
+          "sensitive": false,
+          "provided": false,
+          "value": "##SOURCE_DB_DRIVER_LOCATION##"
+        },
+        {
+          "name": "target.db.driver",
+          "description": "",
+          "sensitive": false,
+          "provided": false,
+          "value": "##TARGET_DB_DRIVER##"
+        },
+        {
+          "name": "target.db.driver.location",
+          "description": "",
+          "sensitive": false,
+          "provided": false,
+          "value": "##TARGET_DB_DRIVER_LOCATION##"
+        },
+        {
+          "name": "target.db.type",
+          "description": "",
+          "sensitive": false,
+          "provided": false,
+          "value": "##TARGET_DB_TYPE##"
         }
       ],
       "inheritedParameterContexts": [],

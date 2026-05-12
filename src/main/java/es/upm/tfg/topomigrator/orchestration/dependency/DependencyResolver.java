@@ -33,8 +33,8 @@ public class DependencyResolver {
 
         // Normalizamos todas las tablas para facilitar comparaciones ignorando mayúsculas
         Set<String> normalizedIncluded = includedTables.stream()
-                .map(String::toLowerCase)
-                .collect(Collectors.toSet());
+                .map(this::normalizeTableId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
 
         DependencyGraph graph = new DependencyGraph();
 
@@ -47,10 +47,16 @@ public class DependencyResolver {
         int validEdges = 0;
         if (dependencies != null) {
             for (ForeignKeyDependency dep : dependencies) {
-                if (normalizedIncluded.contains(dep.getParentTable()) && 
-                    normalizedIncluded.contains(dep.getDependentTable())) {
-                    TableNode parent = new TableNode(dep.getParentTable());
-                    TableNode dependent = new TableNode(dep.getDependentTable());
+                if (dep == null) {
+                    throw new IllegalArgumentException("La dependencia no puede ser nula.");
+                }
+
+                String parentName = normalizeTableId(dep.getParentTable());
+                String dependentName = normalizeTableId(dep.getDependentTable());
+
+                if (normalizedIncluded.contains(parentName) && normalizedIncluded.contains(dependentName)) {
+                    TableNode parent = new TableNode(parentName);
+                    TableNode dependent = new TableNode(dependentName);
                     graph.addDependency(parent, dependent);
                     validEdges++;
                 } else {
@@ -63,6 +69,13 @@ public class DependencyResolver {
 
         // 3. Delegamos el ordenamiento topológico
         return applyKahnsAlgorithm(graph);
+    }
+
+    private String normalizeTableId(String tableId) {
+        if (tableId == null || tableId.trim().isEmpty()) {
+            throw new IllegalArgumentException("El identificador de tabla no puede ser nulo o vacio.");
+        }
+        return tableId.trim().toLowerCase(Locale.ROOT);
     }
 
     /**

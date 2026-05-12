@@ -6,16 +6,26 @@
 #  - Las credenciales se resuelven desde variables de entorno.
 #  - Puedes usar la sintaxis ${VAR} o ${VAR:valor_por_defecto}.
 #  - No se guardan contraseñas reales en este fichero.
+#
+#  NiFi:
+#  - driverLocation debe apuntar al .jar disponible dentro del contenedor NiFi.
+#  - databaseType alimenta PutDatabaseRecord. Por defecto se mantiene PostgreSQL
+#    porque el prototipo está validado sobre PostgreSQL, pero ya no queda fijado
+#    directamente en el JSON del flujo.
 # ═══════════════════════════════════════════════════════════════════════════
 
 source:
   driver: ${SOURCE_DB_DRIVER:org.postgresql.Driver}
+  driverLocation: ${SOURCE_DB_DRIVER_LOCATION:/opt/nifi/drivers/postgresql-42.7.10.jar}
+  databaseType: ${SOURCE_DB_TYPE:PostgreSQL}
   jdbcUrl: ${SOURCE_DB_JDBC_URL}
   username: ${SOURCE_DB_USERNAME}
   password: ${SOURCE_DB_PASSWORD}
 
 target:
   driver: ${TARGET_DB_DRIVER:org.postgresql.Driver}
+  driverLocation: ${TARGET_DB_DRIVER_LOCATION:/opt/nifi/drivers/postgresql-42.7.10.jar}
+  databaseType: ${TARGET_DB_TYPE:PostgreSQL}
   jdbcUrl: ${TARGET_DB_JDBC_URL}
   username: ${TARGET_DB_USERNAME}
   password: ${TARGET_DB_PASSWORD}

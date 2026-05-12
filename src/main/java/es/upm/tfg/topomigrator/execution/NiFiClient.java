@@ -19,8 +19,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -57,6 +60,15 @@ public class NiFiClient {
         this.password = envPass;
 
         initializeClient();
+    }
+
+    NiFiClient(String baseUrl, String username, String password, boolean initializeClient) {
+        this.baseUrl = baseUrl;
+        this.username = username;
+        this.password = password;
+        if (initializeClient) {
+            initializeClient();
+        }
     }
 
     /**
@@ -242,10 +254,19 @@ public class NiFiClient {
      * Obtiene las métricas en crudo del Process Group (bytes read, records, threads).
      */
     public JsonObject getProcessGroupStatus(String processGroupId) throws Exception {
+        return getProcessGroupStatus(processGroupId, false);
+    }
+
+    public JsonObject getProcessGroupStatus(String processGroupId, boolean recursive) throws Exception {
         if (jwtToken == null) throw new IllegalStateException("Cliente no autenticado.");
 
+        String statusUrl = baseUrl + "/flow/process-groups/" + processGroupId + "/status";
+        if (recursive) {
+            statusUrl += "?recursive=true";
+        }
+
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/flow/process-groups/" + processGroupId + "/status"))
+                .uri(URI.create(statusUrl))
                 .header("Authorization", "Bearer " + jwtToken)
                 .header("Accept", "application/json")
                 .GET()
@@ -257,6 +278,127 @@ public class NiFiClient {
         } else {
             logger.error("Error al obtener status de NiFi para el grupo {}. HTTP {}", processGroupId, response.statusCode());
             throw new RuntimeException("Error consultando métricas: " + response.statusCode());
+        }
+    }
+
+    /**
+     * Inspecciona el estado recursivo del Process Group y detecta si los procesadores
+     * de fallo de la plantilla recibieron FlowFiles. Esto evita marcar una tabla como
+     * correcta solo porque NiFi ya no tenga hilos activos ni colas pendientes.
+     */
+    public List<String> collectFailureDiagnostics(String processGroupId) {
+        try {
+            ensureAuthenticated();
+            java.util.Map<String, String> failureProcessors = collectFailureProcessors(processGroupId);
+            if (failureProcessors.isEmpty()) {
+                throw new IllegalStateException("No se encontraron procesadores NiFiFailure_ en el flujo. "
+                        + "No se puede verificar de forma segura si NiFi terminó con errores internos.");
+            }
+
+            JsonObject status = getProcessGroupStatus(processGroupId, true);
+            List<String> diagnostics = new ArrayList<>();
+            collectFailureProcessorStatus(status, failureProcessors, diagnostics);
+            return diagnostics;
+        } catch (Exception e) {
+            String message = "No se pudo inspeccionar el estado interno de fallo del Process Group "
+                    + processGroupId + ": " + e.getMessage();
+            logger.error(message, e);
+            throw new IllegalStateException(message, e);
+        }
+    }
+
+    private java.util.Map<String, String> collectFailureProcessors(String processGroupId) throws Exception {
+        java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+        collectFailureProcessorsFromFlow(processGroupId, result, new LinkedHashSet<>());
+        return result;
+    }
+
+    private void collectFailureProcessorsFromFlow(String processGroupId, java.util.Map<String, String> result, Set<String> visitedGroups) throws Exception {
+        if (processGroupId == null || processGroupId.isBlank() || !visitedGroups.add(processGroupId)) {
+            return;
+        }
+
+        JsonObject processGroupFlow = getProcessGroupFlow(processGroupId);
+        JsonObject processGroupFlowEntity = getObject(processGroupFlow, "processGroupFlow");
+        JsonObject flow = getObject(processGroupFlowEntity, "flow");
+        if (flow == null) {
+            return;
+        }
+
+        if (flow.has("processors") && flow.get("processors").isJsonArray()) {
+            for (JsonElement processorElement : flow.getAsJsonArray("processors")) {
+                if (processorElement == null || !processorElement.isJsonObject()) {
+                    continue;
+                }
+                JsonObject processorEntity = processorElement.getAsJsonObject();
+                JsonObject component = getObject(processorEntity, "component");
+                String id = extractComponentId(processorEntity);
+                String name = firstNonBlank(getString(component, "name"), getString(processorEntity, "name"));
+                if (id != null && name != null && name.startsWith("NiFiFailure_")) {
+                    result.put(id, name);
+                }
+            }
+        }
+
+        if (flow.has("processGroups") && flow.get("processGroups").isJsonArray()) {
+            for (JsonElement groupElement : flow.getAsJsonArray("processGroups")) {
+                if (groupElement != null && groupElement.isJsonObject()) {
+                    String childId = extractComponentId(groupElement.getAsJsonObject());
+                    collectFailureProcessorsFromFlow(childId, result, visitedGroups);
+                }
+            }
+        }
+    }
+
+    private void collectFailureProcessorStatus(JsonElement element, java.util.Map<String, String> failureProcessors, List<String> diagnostics) {
+        if (element == null || element.isJsonNull()) {
+            return;
+        }
+
+        if (element.isJsonObject()) {
+            JsonObject object = element.getAsJsonObject();
+            String id = firstNonBlank(getString(object, "id"), getString(object, "componentId"));
+            String failureProcessorName = id != null ? failureProcessors.get(id) : null;
+            if (failureProcessorName != null) {
+                long flowFilesIn = firstPositiveMetric(object, "flowFilesIn", "inputCount", "flowFilesReceived", "flowFilesQueued");
+                if (flowFilesIn > 0) {
+                    diagnostics.add(failureProcessorName + " recibió " + flowFilesIn + " FlowFile(s) por una relación failure");
+                }
+            }
+
+            for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+                collectFailureProcessorStatus(entry.getValue(), failureProcessors, diagnostics);
+            }
+        } else if (element.isJsonArray()) {
+            JsonArray array = element.getAsJsonArray();
+            for (JsonElement child : array) {
+                collectFailureProcessorStatus(child, failureProcessors, diagnostics);
+            }
+        }
+    }
+
+    private long firstPositiveMetric(JsonObject object, String... keys) {
+        for (String key : keys) {
+            long value = parseLongMetric(getString(object, key));
+            if (value > 0) {
+                return value;
+            }
+        }
+        return 0L;
+    }
+
+    private long parseLongMetric(String rawValue) {
+        if (rawValue == null || rawValue.isBlank()) {
+            return 0L;
+        }
+        String number = rawValue.trim().split(" ")[0].replaceAll("[^0-9]", "");
+        if (number.isBlank()) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(number);
+        } catch (NumberFormatException e) {
+            return 0L;
         }
     }
 

@@ -1,5 +1,6 @@
 package es.upm.tfg.topomigrator.validations;
 
+import es.upm.tfg.topomigrator.model.IncrementalConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.exceptions.InvalidContractException;
 import es.upm.tfg.topomigrator.model.TableMigration;
@@ -103,6 +104,7 @@ public class ContractValidator {
             throw new InvalidContractException("El contrato debe tener al menos una tabla definida en la sección 'tables'.");
         }
         
+        int activeTables = 0;
         for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
             String tableName = entry.getKey();
             TableMigration tableDef = entry.getValue();
@@ -114,6 +116,11 @@ public class ContractValidator {
             if (tableDef == null) {
                 throw new InvalidContractException("La configuración para la tabla '" + tableName + "' es nula.");
             }
+
+            if (!tableDef.isEnabled()) {
+                continue;
+            }
+            activeTables++;
 
             // Validar que se ha especificado correctamente el origen y el destino
             if (tableDef.getSource() == null || tableDef.getSource().getTable() == null || tableDef.getSource().getTable().trim().isEmpty()) {
@@ -135,8 +142,55 @@ public class ContractValidator {
                 throw new InvalidContractException("Valor no permitido en 'migrationType' para la tabla '" + tableName + "'. Valores permitidos: 'full', 'incremental'.");
             }
             
-            if ("incremental".equals(normalizedMigType) && tableDef.getIncrementalConfig() == null) {
-                throw new InvalidContractException("El tipo de migración es 'incremental' pero falta el bloque 'incrementalConfig' en '" + tableName + "'.");
+            if ("incremental".equals(normalizedMigType)) {
+                IncrementalConfig incrementalConfig = tableDef.getIncrementalConfig();
+                if (incrementalConfig == null) {
+                    throw new InvalidContractException("El tipo de migración es 'incremental' pero falta el bloque 'incrementalConfig' en '" + tableName + "'.");
+                }
+                if (incrementalConfig.getColumn() == null
+                        || incrementalConfig.getColumn().trim().isEmpty()) {
+                    throw new InvalidContractException("La migración incremental de '" + tableName + "' requiere incrementalConfig.column.");
+                }
+                if (incrementalConfig.getStartValue() == null
+                        || incrementalConfig.getStartValue().trim().isEmpty()) {
+                    throw new InvalidContractException("La migración incremental de '" + tableName + "' requiere incrementalConfig.startValue.");
+                }
+                if (incrementalConfig.getBatchSize() != null
+                        && incrementalConfig.getBatchSize() <= 0) {
+                    throw new InvalidContractException("La migración incremental de '" + tableName + "' requiere incrementalConfig.batchSize mayor que 0.");
+                }
+
+                validateIncrementalLoadStrategy(tableName, incrementalConfig);
+            }
+        }
+
+        if (activeTables == 0) {
+            throw new InvalidContractException("No hay tablas activas en el contrato de migracion.");
+        }
+    }
+
+    private static void validateIncrementalLoadStrategy(String tableName, IncrementalConfig incrementalConfig) {
+        String loadStrategy = incrementalConfig.getLoadStrategy();
+        if (loadStrategy != null && !loadStrategy.trim().isEmpty()) {
+            String normalizedLoadStrategy = loadStrategy.trim().toLowerCase();
+            if (!normalizedLoadStrategy.equals("upsert")
+                    && !normalizedLoadStrategy.equals("append")
+                    && !normalizedLoadStrategy.equals("append_only")) {
+                throw new InvalidContractException("Valor no permitido en incrementalConfig.loadStrategy para la tabla '"
+                        + tableName + "'. Valores permitidos: 'upsert', 'append', 'append_only'.");
+            }
+        }
+
+        if (incrementalConfig.getIdempotencyKeyColumns() != null) {
+            if (incrementalConfig.getIdempotencyKeyColumns().isEmpty()) {
+                throw new InvalidContractException("La tabla '" + tableName
+                        + "' requiere al menos una columna en incrementalConfig.idempotencyKeyColumns si el bloque se declara.");
+            }
+            for (String column : incrementalConfig.getIdempotencyKeyColumns()) {
+                if (column == null || column.trim().isEmpty()) {
+                    throw new InvalidContractException("La tabla '" + tableName
+                            + "' contiene una columna vacía en incrementalConfig.idempotencyKeyColumns.");
+                }
             }
         }
     }

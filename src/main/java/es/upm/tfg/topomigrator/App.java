@@ -3,6 +3,7 @@ package es.upm.tfg.topomigrator;
 import es.upm.tfg.topomigrator.config.ContractLoader;
 import es.upm.tfg.topomigrator.execution.ExecutionEngine;
 import es.upm.tfg.topomigrator.execution.LiquibaseSchemaExecutor;
+import es.upm.tfg.topomigrator.model.DatabaseConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.orchestration.dependency.DependencyResolver;
@@ -29,6 +30,13 @@ import java.util.Map;
 public class App {
     private static final Logger logger = LoggerFactory.getLogger(App.class);
 
+    private static DatabaseConfig requireDatabaseConfig(MigrationContract contract) {
+        if (contract == null || contract.getDatabase() == null) {
+            throw new IllegalStateException("El contrato no contiene configuracion database para validar conexiones JDBC.");
+        }
+        return contract.getDatabase();
+    }
+
     public static void main(String[] args) {
         logger.info("Iniciando orquestador TopoMigrator...");
 
@@ -54,8 +62,9 @@ public class App {
             logger.info("Tablas activas a procesar: {}", contract.getTables().keySet());
 
             // 3. Pruebas de conexión JDBC previas a la migración
-            DatabaseConnectionManager.testConnection(contract.getDatabase().getSourceConnection(), "Base de Datos Origen");
-            DatabaseConnectionManager.testConnection(contract.getDatabase().getTargetConnection(), "Base de Datos Destino");
+            DatabaseConfig database = requireDatabaseConfig(contract);
+            DatabaseConnectionManager.testConnection(database.getSourceConnection(), "Base de Datos Origen");
+            DatabaseConnectionManager.testConnection(database.getTargetConnection(), "Base de Datos Destino");
 
             // 4. Validaciones preventivas de Fase 1 (Solo origen)
             SchemaCompatibilityValidator.validateSourceSchemas(contract);
@@ -99,7 +108,7 @@ public class App {
 
             // 11. Motor de Ejecución: la migración de datos solo comienza si todo lo anterior fue bien
             ExecutionEngine engine = new ExecutionEngine();
-            engine.executeMigration(executionOrder, contract);
+            engine.executeMigration(executionOrder, contract, dependencies);
 
             logger.info("Migración orquestada y desplegada correctamente.");
 

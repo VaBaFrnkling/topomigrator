@@ -25,6 +25,7 @@ public class SummaryTrace {
         public int total;
         public int successful;
         public int failed;
+        public int blocked;
     }
 
     public static class DependencyAnalysis {

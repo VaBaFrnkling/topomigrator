@@ -1,5 +1,6 @@
 package es.upm.tfg.topomigrator.orchestration.dependency;
 
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -12,7 +13,7 @@ public class TableNode implements Comparable<TableNode> {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("El nombre de la tabla no puede ser nulo o vacío");
         }
-        this.name = name.toLowerCase(); // Formato normalizado para resolución
+        this.name = name.toLowerCase(Locale.ROOT); // Formato normalizado para resolución
     }
 
     public String getName() {

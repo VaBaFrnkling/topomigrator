@@ -12,6 +12,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -104,6 +106,8 @@ public class TargetChangelogValidator {
                     throw new InvalidChangelogException(
                             "El archivo " + changelogPath.getFileName() + " no contiene la marca raíz 'databaseChangeLog' obligatoria en Liquibase.");
                 }
+
+                validateChangelogTargetsTable(rootNode, changelogPath, targetSchema, targetTable);
             } catch (Exception e) {
                 if (e instanceof InvalidChangelogException) {
                     throw (InvalidChangelogException) e;
@@ -114,6 +118,63 @@ public class TargetChangelogValidator {
         }
 
         log.info("Validación de Changelogs completada con éxito. Todos los archivos requeridos están presentes y son YAML válidos.");
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void validateChangelogTargetsTable(Map<?, ?> rootNode, Path changelogPath, String targetSchema, String targetTable) {
+        Object databaseChangeLog = rootNode.get("databaseChangeLog");
+        if (!(databaseChangeLog instanceof List)) {
+            throw new InvalidChangelogException("El archivo " + changelogPath.getFileName()
+                    + " debe contener 'databaseChangeLog' como lista de cambios Liquibase.");
+        }
+
+        List<String> createdTables = new ArrayList<>();
+        for (Object item : (List<?>) databaseChangeLog) {
+            if (!(item instanceof Map)) {
+                continue;
+            }
+            Object changeSetObject = ((Map<?, ?>) item).get("changeSet");
+            if (!(changeSetObject instanceof Map)) {
+                continue;
+            }
+            Object changesObject = ((Map<?, ?>) changeSetObject).get("changes");
+            if (!(changesObject instanceof List)) {
+                continue;
+            }
+            for (Object changeObject : (List<?>) changesObject) {
+                if (!(changeObject instanceof Map)) {
+                    continue;
+                }
+                Object createTableObject = ((Map<?, ?>) changeObject).get("createTable");
+                if (!(createTableObject instanceof Map)) {
+                    continue;
+                }
+                Map<?, ?> createTable = (Map<?, ?>) createTableObject;
+                String schemaName = asString(createTable.get("schemaName"));
+                String tableName = asString(createTable.get("tableName"));
+                if (tableName != null) {
+                    createdTables.add((schemaName != null ? schemaName + "." : "") + tableName);
+                }
+                if (equalsIgnoreCase(schemaName, targetSchema) && equalsIgnoreCase(tableName, targetTable)) {
+                    return;
+                }
+            }
+        }
+
+        throw new InvalidChangelogException("El archivo " + changelogPath.getFileName()
+                + " existe y es YAML Liquibase válido, pero no contiene un createTable para la tabla destino esperada '"
+                + targetSchema + "." + targetTable + "'. Tablas createTable encontradas: " + createdTables);
+    }
+
+    private static String asString(Object value) {
+        return value != null ? value.toString() : null;
+    }
+
+    private static boolean equalsIgnoreCase(String left, String right) {
+        if (left == null || right == null) {
+            return false;
+        }
+        return left.trim().equalsIgnoreCase(right.trim());
     }
 
     static Path findChangelogForTarget(Path directory, String targetSchema, String targetTable) {

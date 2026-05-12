@@ -1,6 +1,7 @@
 package es.upm.tfg.topomigrator.orchestration.dependency;
 
 import java.util.Objects;
+import java.util.Locale;
 
 /**
  * Representa una dependencia de clave foránea entre dos tablas.
@@ -19,8 +20,8 @@ public class ForeignKeyDependency {
         if (dependentTable == null || dependentTable.isBlank()) {
             throw new IllegalArgumentException("La tabla dependiente no puede ser nula o vacía");
         }
-        this.parentTable = parentTable.toLowerCase();
-        this.dependentTable = dependentTable.toLowerCase();
+        this.parentTable = parentTable.trim().toLowerCase(Locale.ROOT);
+        this.dependentTable = dependentTable.trim().toLowerCase(Locale.ROOT);
     }
 
     public String getParentTable() {

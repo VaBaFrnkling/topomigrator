@@ -74,12 +74,14 @@ COPY changelogs ./changelogs
 #   outputs/errors/   → Registro de errores
 #   outputs/logs/     → Logs generales de ejecución
 #   outputs/traces/   → Trazas y auditoría por tabla/ejecución
+#   outputs/state/    → Cursor incremental persistido entre ejecuciones
 #
 # Estos directorios pueden seguir montándose desde fuera si se desea
 # persistir la información en el host.
 RUN mkdir -p outputs/errors \
              outputs/logs \
-             outputs/traces
+             outputs/traces \
+             outputs/state
 
 # -------------------------Arranque del contenedor-------------------------
 

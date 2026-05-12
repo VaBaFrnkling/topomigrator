@@ -17,9 +17,7 @@ public final class TableIdentityUtils {
     }
 
     public static String normalizeSchema(String schema) {
-        return (schema == null || schema.trim().isEmpty())
-                ? DEFAULT_SCHEMA
-                : schema.trim().toLowerCase(Locale.ROOT);
+        return SchemaTableIdentifierUtils.normalizeSchema(schema);
     }
 
     public static String normalizeTable(String table) {
@@ -30,7 +28,7 @@ public final class TableIdentityUtils {
     }
 
     public static String toPhysicalId(String schema, String table) {
-        return normalizeSchema(schema) + "." + normalizeTable(table);
+        return SchemaTableIdentifierUtils.toQualifiedIdentifier(schema, table);
     }
 
     public static String toPhysicalId(TableRef ref) {

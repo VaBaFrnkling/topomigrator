@@ -11,6 +11,7 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -36,7 +37,7 @@ public class MetadataDependencyExtractor {
 
         Set<String> normalizedIncluded = new LinkedHashSet<>();
         for (String tableId : includedTableIds) {
-            normalizedIncluded.add(tableId.toLowerCase());
+            normalizedIncluded.add(normalizeIncludedPhysicalId(tableId));
         }
 
         logger.info("Iniciando escaneo transaccional de metadatos (JDBC) para {} tablas físicas...", normalizedIncluded.size());
@@ -73,5 +74,23 @@ public class MetadataDependencyExtractor {
 
         logger.info("Escaneo finalizado por completo. Halladas {} dependencias estructurales dentro del lote configurado.", uniqueDependencies.size());
         return new ArrayList<>(uniqueDependencies);
+    }
+
+    private String normalizeIncludedPhysicalId(String tableId) {
+        if (tableId == null || tableId.trim().isEmpty()) {
+            throw new IllegalArgumentException("El id de tabla incluida debe tener formato schema.table.");
+        }
+
+        String normalized = tableId.trim().toLowerCase(Locale.ROOT);
+        int firstSeparator = normalized.indexOf('.');
+        int lastSeparator = normalized.lastIndexOf('.');
+        if (firstSeparator <= 0 || firstSeparator != lastSeparator || firstSeparator == normalized.length() - 1) {
+            throw new IllegalArgumentException("El id de tabla incluida debe tener formato schema.table: " + tableId);
+        }
+
+        return TableIdentityUtils.toPhysicalId(
+                TableIdentityUtils.schemaFromPhysicalId(normalized),
+                TableIdentityUtils.tableFromPhysicalId(normalized)
+        );
     }
 }

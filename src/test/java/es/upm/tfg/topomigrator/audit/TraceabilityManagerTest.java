@@ -67,7 +67,7 @@ public class TraceabilityManagerTest extends TestCase {
         TableTrace trace = buildValidTableTrace("test_write_trace");
         manager.writeTableTrace(trace);
 
-        Path expectedFile = tracesTablesDir.resolve("test_write_trace.json");
+        Path expectedFile = tracesTablesDir.resolve("public.test_write_trace.json");
         assertTrue("El fichero de traza debería existir", Files.exists(expectedFile));
     }
 
@@ -81,7 +81,7 @@ public class TraceabilityManagerTest extends TestCase {
 
         manager.writeTableTrace(trace);
 
-        Path file = tracesTablesDir.resolve("test_content_check.json");
+        Path file = tracesTablesDir.resolve("public.test_content_check.json");
         String json = Files.readString(file);
         JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
 
@@ -101,7 +101,7 @@ public class TraceabilityManagerTest extends TestCase {
 
         manager.writeTableTrace(trace);
 
-        Path file = tracesTablesDir.resolve("test_mapping.json");
+        Path file = tracesTablesDir.resolve("sales.test_mapping.json");
         String json = Files.readString(file);
         JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
         JsonObject tableObj = obj.getAsJsonObject("table");
@@ -109,6 +109,42 @@ public class TraceabilityManagerTest extends TestCase {
         assertEquals("clientes_src", tableObj.getAsJsonObject("source").get("name").getAsString());
         assertEquals("test_mapping", tableObj.getAsJsonObject("target").get("name").getAsString());
         assertEquals("sales", tableObj.getAsJsonObject("target").get("schema").getAsString());
+    }
+
+    /** Verifica que los campos obligatorios de auditoria se serializan aunque esten vacios. */
+    public void testWriteTableTraceContainsRequiredAuditFields() throws Exception {
+        TableTrace trace = buildValidTableTrace("test_required_fields");
+        trace.errors = new ArrayList<>();
+        trace.auditMetrics = new TableTrace.AuditMetrics();
+        trace.auditMetrics.strategy = "SOURCE_QUERY_COUNT_WITH_TARGET_DELTA_VALIDATION";
+        trace.auditMetrics.sourceSelectedRecords = 10L;
+        trace.auditMetrics.targetRowsBefore = 2L;
+        trace.auditMetrics.targetRowsAfter = 12L;
+        trace.auditMetrics.targetNetDelta = 10L;
+        trace.auditMetrics.consistencyStatus = "MATCH";
+        trace.auditMetrics.warnings = new ArrayList<>();
+
+        manager.writeTableTrace(trace);
+
+        Path file = tracesTablesDir.resolve("public.test_required_fields.json");
+        String json = Files.readString(file);
+        JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
+        JsonObject timing = obj.getAsJsonObject("timing");
+        JsonObject auditMetrics = obj.getAsJsonObject("auditMetrics");
+
+        assertTrue(obj.has("errors"));
+        assertTrue(obj.getAsJsonArray("errors").isEmpty());
+        assertTrue(obj.has("auditMetrics"));
+        assertEquals("2026-01-01T00:00:00", timing.get("startTime").getAsString());
+        assertEquals("2026-01-01T00:01:00", timing.get("endTime").getAsString());
+        assertTrue(timing.get("durationMs").getAsLong() >= 0L);
+        assertEquals(10L, auditMetrics.get("sourceSelectedRecords").getAsLong());
+        assertEquals(2L, auditMetrics.get("targetRowsBefore").getAsLong());
+        assertEquals(12L, auditMetrics.get("targetRowsAfter").getAsLong());
+        assertEquals(10L, auditMetrics.get("targetNetDelta").getAsLong());
+        assertEquals("MATCH", auditMetrics.get("consistencyStatus").getAsString());
+        assertTrue(auditMetrics.has("warnings"));
+        assertTrue(auditMetrics.getAsJsonArray("warnings").isEmpty());
     }
 
     // ═══════════════════════════════════════════════════════════════════

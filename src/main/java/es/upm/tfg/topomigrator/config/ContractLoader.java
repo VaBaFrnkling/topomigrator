@@ -16,6 +16,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Map;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -28,12 +30,30 @@ public class ContractLoader {
     private static final Logger log = LoggerFactory.getLogger(ContractLoader.class);
     private static final Pattern ENV_PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{([A-Za-z0-9_]+)(?::([^}]*))?}");
 
+    private final Path datasourceConfigPath;
+    private final Function<String, String> envProvider;
+    private final Supplier<String> systemUserProvider;
+
+    public ContractLoader() {
+        this(null, System::getenv, () -> System.getProperty("user.name"));
+    }
+
+    public ContractLoader(Path datasourceConfigPath) {
+        this(datasourceConfigPath, System::getenv, () -> System.getProperty("user.name"));
+    }
+
+    ContractLoader(Path datasourceConfigPath, Function<String, String> envProvider, Supplier<String> systemUserProvider) {
+        this.datasourceConfigPath = datasourceConfigPath;
+        this.envProvider = envProvider;
+        this.systemUserProvider = systemUserProvider;
+    }
+
     /**
      * Carga el contrato desde la ruta indicada y fusiona sus propiedades
      * con las variables de entorno.
      *
      * @param contractPath Ruta absoluta o relativa al fichero contract.yaml
-     * @return MigrationContract con toda la configuración parseada y actualizada
+     * @return MigrationContract con toda la configuracion parseada y actualizada
      * @throws IOException si el fichero no existe o no puede leerse
      */
     public MigrationContract load(Path contractPath) throws IOException {
@@ -50,15 +70,8 @@ public class ContractLoader {
             if (contract.getMigration() != null) {
                 String execUser = contract.getMigration().getAuthor();
                 if ("${USERNAME}".equals(execUser) || "${USER}".equals(execUser)) {
-                    String sysUser = System.getProperty("user.name");
-                    if (sysUser == null || sysUser.trim().isEmpty()) {
-                        sysUser = System.getenv("USERNAME");
-                    }
-                    if (sysUser == null || sysUser.trim().isEmpty()) {
-                        sysUser = System.getenv("USER");
-                    }
-                    contract.getMigration().setAuthor(sysUser != null ? sysUser : "unknown_user");
-                    log.info("Usuario de ejecución dinámico evaluado a: {}", contract.getMigration().getAuthor());
+                    contract.getMigration().setAuthor(resolveExecutionUser());
+                    log.info("Usuario de ejecucion dinamico evaluado a: {}", contract.getMigration().getAuthor());
                 }
             }
 
@@ -77,15 +90,10 @@ public class ContractLoader {
         }
     }
 
-    @SuppressWarnings("unchecked")
     private void loadDatabaseConfigurationFromYaml(MigrationContract contract) throws IOException {
-        String dsPathStr = System.getenv("DATASOURCES_CONFIG_PATH");
-        if (dsPathStr == null || dsPathStr.trim().isEmpty()) {
-            dsPathStr = "configs/datasources.yaml";
-        }
-        Path dsPath = Paths.get(dsPathStr);
+        Path dsPath = resolveDatasourceConfigPath();
 
-        log.info("Cargando configuración de bases de datos desde: {}", dsPath.toAbsolutePath());
+        log.info("Cargando configuracion de bases de datos desde: {}", dsPath.toAbsolutePath());
 
         if (!Files.exists(dsPath)) {
             throw new IOException("Fichero de datasources no encontrado: " + dsPath.toAbsolutePath());
@@ -93,30 +101,65 @@ public class ContractLoader {
 
         Yaml yaml = new Yaml();
         try (InputStream dsIs = new FileInputStream(dsPath.toFile())) {
-            Map<String, Object> data = (Map<String, Object>) yaml.load(dsIs);
+            Object loaded = yaml.load(dsIs);
+            if (!(loaded instanceof Map)) {
+                throw new IOException("El fichero de datasources debe contener un mapa raiz: " + dsPath.toAbsolutePath());
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> data = (Map<String, Object>) loaded;
             DatabaseConfig dbConfig = new DatabaseConfig();
 
             dbConfig.setSourceConnection(buildConnectionConfig(data, "source", dsPath));
             dbConfig.setTargetConnection(buildConnectionConfig(data, "target", dsPath));
 
             contract.setDatabase(dbConfig);
-            log.info("Configuración de bases de datos cargada desde {}.", dsPath.getFileName());
+            log.info("Configuracion de bases de datos cargada desde {}.", dsPath.getFileName());
         }
+    }
+
+    private Path resolveDatasourceConfigPath() {
+        if (datasourceConfigPath != null) {
+            return datasourceConfigPath;
+        }
+
+        String dsPathStr = envProvider.apply("DATASOURCES_CONFIG_PATH");
+        if (dsPathStr == null || dsPathStr.trim().isEmpty()) {
+            dsPathStr = "configs/datasources.yaml";
+        } else {
+            dsPathStr = dsPathStr.trim();
+        }
+        return Paths.get(dsPathStr);
     }
 
     @SuppressWarnings("unchecked")
     private ConnectionConfig buildConnectionConfig(Map<String, Object> data, String section, Path filePath) throws IOException {
-        Map<String, Object> sectionMap = (Map<String, Object>) data.get(section);
-        if (sectionMap == null) {
-            throw new IOException("Sección '" + section + "' no encontrada en " + filePath);
+        Object sectionValue = data.get(section);
+        if (sectionValue == null) {
+            throw new IOException("Seccion '" + section + "' no encontrada en " + filePath);
+        }
+        if (!(sectionValue instanceof Map)) {
+            throw new IOException("Seccion '" + section + "' debe ser un mapa en " + filePath);
         }
 
+        Map<String, Object> sectionMap = (Map<String, Object>) sectionValue;
+
         ConnectionConfig config = new ConnectionConfig();
-        config.setDriver(resolveEnvironmentPlaceholders(getMapValue(sectionMap, "driver"), section + ".driver"));
-        config.setJdbcUrl(resolveEnvironmentPlaceholders(getMapValue(sectionMap, "jdbcUrl"), section + ".jdbcUrl"));
-        config.setUsername(resolveEnvironmentPlaceholders(getMapValue(sectionMap, "username"), section + ".username"));
-        config.setPassword(resolveEnvironmentPlaceholders(getMapValue(sectionMap, "password"), section + ".password"));
+        config.setDriver(resolveRequiredField(sectionMap, "driver", section + ".driver"));
+        config.setDriverLocation(resolveRequiredField(sectionMap, "driverLocation", section + ".driverLocation"));
+        config.setDatabaseType(resolveRequiredField(sectionMap, "databaseType", section + ".databaseType"));
+        config.setJdbcUrl(resolveRequiredField(sectionMap, "jdbcUrl", section + ".jdbcUrl"));
+        config.setUsername(resolveRequiredField(sectionMap, "username", section + ".username"));
+        config.setPassword(resolveRequiredField(sectionMap, "password", section + ".password"));
         return config;
+    }
+
+    private String resolveRequiredField(Map<String, Object> map, String key, String fieldName) throws IOException {
+        String resolvedValue = resolveEnvironmentPlaceholders(getMapValue(map, key), fieldName);
+        if (resolvedValue == null || resolvedValue.trim().isEmpty()) {
+            throw new IOException("El campo requerido '" + fieldName + "' no puede estar vacio.");
+        }
+        return resolvedValue;
     }
 
     private String getMapValue(Map<String, Object> map, String key) {
@@ -137,10 +180,10 @@ public class ContractLoader {
             found = true;
             String variableName = matcher.group(1);
             String defaultValue = matcher.group(2);
-            String envValue = System.getenv(variableName);
+            String envValue = envProvider.apply(variableName);
 
             if (envValue == null || envValue.trim().isEmpty()) {
-                if (defaultValue != null) {
+                if (defaultValue != null && !defaultValue.trim().isEmpty()) {
                     envValue = defaultValue;
                 } else {
                     throw new IOException("Falta la variable de entorno requerida '" + variableName + "' para " + fieldName);
@@ -152,5 +195,16 @@ public class ContractLoader {
         matcher.appendTail(resolved);
 
         return found ? resolved.toString() : rawValue;
+    }
+
+    private String resolveExecutionUser() {
+        String sysUser = systemUserProvider.get();
+        if (sysUser == null || sysUser.trim().isEmpty()) {
+            sysUser = envProvider.apply("USERNAME");
+        }
+        if (sysUser == null || sysUser.trim().isEmpty()) {
+            sysUser = envProvider.apply("USER");
+        }
+        return sysUser == null || sysUser.trim().isEmpty() ? "unknown_user" : sysUser;
     }
 }

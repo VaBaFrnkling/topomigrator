@@ -19,13 +19,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
  * Ejecutor que conecta a la Base de Datos Destino y aplica manualmente
- * los ficheros de definición de tablas Liquibase expuestos por el usuario.
+ * los ficheros de definicion de tablas Liquibase expuestos por el usuario.
  *
- * Convención obligatoria: changelogs/tables/<schema>.<table>.yaml
+ * Convencion obligatoria: changelogs/tables/<schema>.<table>.yaml
  */
 public class LiquibaseSchemaExecutor {
     private static final Logger log = LoggerFactory.getLogger(LiquibaseSchemaExecutor.class);
@@ -46,6 +47,7 @@ public class LiquibaseSchemaExecutor {
             changelogsDirEnv = "changelogs/tables";
         }
         Path changelogsDir = Paths.get(changelogsDirEnv);
+        Map<String, Path> changelogPathsByTable = resolveChangelogPaths(contract, changelogsDir);
 
         try (Connection targetConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getTargetConnection());
              DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(changelogsDir.toAbsolutePath())) {
@@ -56,22 +58,9 @@ public class LiquibaseSchemaExecutor {
             for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
                 String tableId = entry.getKey();
                 TableMigration tableMigration = entry.getValue();
-
-                if (tableMigration == null || tableMigration.getTarget() == null) {
-                    throw new InvalidChangelogException("La tabla activa '" + tableId + "' no tiene destino válido para aplicar Liquibase.");
-                }
-
                 String targetSchema = tableMigration.getTarget().getSchema();
                 String targetTable = tableMigration.getTarget().getTable();
-                if (targetSchema == null || targetSchema.trim().isEmpty() || targetTable == null || targetTable.trim().isEmpty()) {
-                    throw new InvalidChangelogException("La tabla activa '" + tableId + "' debe definir target.schema y target.table para aplicar Liquibase.");
-                }
-
-                Path changelogPath = getChangelogPath(changelogsDir, targetSchema, targetTable);
-                if (changelogPath == null) {
-                    throw new InvalidChangelogException("Changelog no encontrado para aplicar de la tabla activa: "
-                            + targetSchema + "." + targetTable);
-                }
+                Path changelogPath = changelogPathsByTable.get(tableId);
 
                 log.info("Ejecutando Liquibase -> Desplegando estructura para '{}.{}' usando {}",
                         targetSchema,
@@ -95,9 +84,35 @@ public class LiquibaseSchemaExecutor {
         } catch (InvalidChangelogException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Fallo crítico durante el despliegue de Liquibase en destino", e);
+            throw new RuntimeException("Fallo critico durante el despliegue de Liquibase en destino", e);
         }
         log.info("Despliegue estructural de Liquibase completado. Las tablas destino activas han sido instanciadas.");
+    }
+
+    private static Map<String, Path> resolveChangelogPaths(MigrationContract contract, Path changelogsDir) {
+        Map<String, Path> changelogPathsByTable = new LinkedHashMap<>();
+        for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
+            String tableId = entry.getKey();
+            TableMigration tableMigration = entry.getValue();
+
+            if (tableMigration == null || tableMigration.getTarget() == null) {
+                throw new InvalidChangelogException("La tabla activa '" + tableId + "' no tiene destino valido para aplicar Liquibase.");
+            }
+
+            String targetSchema = tableMigration.getTarget().getSchema();
+            String targetTable = tableMigration.getTarget().getTable();
+            if (targetSchema == null || targetSchema.trim().isEmpty() || targetTable == null || targetTable.trim().isEmpty()) {
+                throw new InvalidChangelogException("La tabla activa '" + tableId + "' debe definir target.schema y target.table para aplicar Liquibase.");
+            }
+
+            Path changelogPath = getChangelogPath(changelogsDir, targetSchema, targetTable);
+            if (changelogPath == null) {
+                throw new InvalidChangelogException("Changelog no encontrado para aplicar de la tabla activa: "
+                        + targetSchema + "." + targetTable);
+            }
+            changelogPathsByTable.put(tableId, changelogPath);
+        }
+        return changelogPathsByTable;
     }
 
     private static Path getChangelogPath(Path directory, String targetSchema, String targetTable) {
