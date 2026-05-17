@@ -21,7 +21,7 @@ src/                        Codigo Java
 outputs/                    Salidas generadas en ejecucion
 ```
 
-`outputs/`, `target/`, `.env`, `_bmad/`, `_bmad-output/`, `.agents/`, `.claude/` y `docs/` no forman parte del proyecto entregable y quedan ignorados por Git.
+`outputs/`, `target/` y `.env` no forman parte del proyecto entregable y quedan ignorados por Git.
 
 ## Configuracion
 
@@ -92,6 +92,8 @@ NIFI_PASSWORD=nifi_password
 NIFI_ALLOW_INSECURE_LOCAL_TLS=true
 ```
 
+`NIFI_ALLOW_INSECURE_LOCAL_TLS=true` esta pensado para el NiFi local de Docker Compose con certificado autofirmado. En entornos con certificado valido, usa `false` u omite la variable.
+
 4. Prepara changelogs Liquibase.
 
 Cada tabla destino activa debe tener su changelog en:
@@ -125,6 +127,8 @@ Levanta NiFi y ejecuta la aplicacion:
 ```bash
 docker compose up --build
 ```
+
+Docker Compose pasa al contenedor las variables `SOURCE_DB_*`, `TARGET_DB_*` y `NIFI_*` definidas en `.env`. Si falta alguna URL, usuario o password de base de datos, Compose aborta antes de arrancar la aplicacion.
 
 NiFi queda disponible en:
 

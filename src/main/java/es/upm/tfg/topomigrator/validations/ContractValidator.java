@@ -11,6 +11,7 @@ import java.util.List;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.io.IOException;
+import java.util.regex.Pattern;
 
 /**
  * Clase para centralizar las validaciones de las reglas, formato y el 
@@ -19,6 +20,7 @@ import java.io.IOException;
 public class ContractValidator {
     
     private static final Logger log = LoggerFactory.getLogger(ContractValidator.class);
+    private static final Pattern SQL_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
     /**
      * Punto de entrada principal para la validación de un contrato de migración.
@@ -130,6 +132,10 @@ public class ContractValidator {
             if (tableDef.getTarget() == null || tableDef.getTarget().getTable() == null || tableDef.getTarget().getTable().trim().isEmpty()) {
                 throw new InvalidContractException("La tabla '" + tableName + "' carece de especificación válida en el destino 'target.table'.");
             }
+            validateOptionalSqlIdentifier(tableName, "source.schema", tableDef.getSource().getSchema());
+            validateSqlIdentifier(tableName, "source.table", tableDef.getSource().getTable());
+            validateOptionalSqlIdentifier(tableName, "target.schema", tableDef.getTarget().getSchema());
+            validateSqlIdentifier(tableName, "target.table", tableDef.getTarget().getTable());
 
             // Validar que el tipo de migración está presente y concuerda con sus sub-configuraciones
             String migType = tableDef.getMigrationType();
@@ -151,6 +157,7 @@ public class ContractValidator {
                         || incrementalConfig.getColumn().trim().isEmpty()) {
                     throw new InvalidContractException("La migración incremental de '" + tableName + "' requiere incrementalConfig.column.");
                 }
+                validateSqlIdentifier(tableName, "incrementalConfig.column", incrementalConfig.getColumn());
                 if (incrementalConfig.getStartValue() == null
                         || incrementalConfig.getStartValue().trim().isEmpty()) {
                     throw new InvalidContractException("La migración incremental de '" + tableName + "' requiere incrementalConfig.startValue.");
@@ -191,7 +198,23 @@ public class ContractValidator {
                     throw new InvalidContractException("La tabla '" + tableName
                             + "' contiene una columna vacía en incrementalConfig.idempotencyKeyColumns.");
                 }
+                validateSqlIdentifier(tableName, "incrementalConfig.idempotencyKeyColumns", column);
             }
+        }
+    }
+
+    private static void validateOptionalSqlIdentifier(String tableName, String field, String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return;
+        }
+        validateSqlIdentifier(tableName, field, value);
+    }
+
+    private static void validateSqlIdentifier(String tableName, String field, String value) {
+        String normalized = value != null ? value.trim() : "";
+        if (!SQL_IDENTIFIER.matcher(normalized).matches()) {
+            throw new InvalidContractException("La tabla '" + tableName + "' contiene un identificador SQL no valido en "
+                    + field + ": '" + value + "'. Use solo letras, numeros y guion bajo, empezando por letra o guion bajo.");
         }
     }
 }

@@ -318,6 +318,20 @@ public class ContractValidatorTest extends TestCase {
         }
     }
 
+    public void testInvalidSourceTableIdentifierThrows() {
+        MigrationContract c = buildValidContract();
+        TableMigration t = buildMinimalTable();
+        t.setSource(buildTableRef("public", "tabla-origen"));
+        c.getTables().put("tabla_source_identificador_invalido", t);
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException por identificador SQL invalido en source.table.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("source.table"));
+            assertTrue(e.getMessage().contains("identificador SQL"));
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //  5. SECCIÓN 'tables' — TARGET
     // ═══════════════════════════════════════════════════════════════════════════
@@ -491,6 +505,20 @@ public class ContractValidatorTest extends TestCase {
         }
     }
 
+    public void testIncrementalWithInvalidColumnIdentifierThrows() {
+        MigrationContract c = buildValidContract();
+        TableMigration t = buildIncrementalTable();
+        t.getIncrementalConfig().setColumn("fecha;drop");
+        c.getTables().put("tabla_inc_columna_invalida", t);
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException por identificador SQL invalido en incrementalConfig.column.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("incrementalConfig.column"));
+            assertTrue(e.getMessage().contains("identificador SQL"));
+        }
+    }
+
     /** Prueba que incrementalConfig.startValue vacio lanza excepcion. */
     public void testIncrementalWithEmptyStartValueThrows() {
         MigrationContract c = buildValidContract();
@@ -558,6 +586,20 @@ public class ContractValidatorTest extends TestCase {
             fail("Se esperaba InvalidContractException por columna vacia en idempotencyKeyColumns.");
         } catch (InvalidContractException e) {
             assertTrue(e.getMessage().contains("idempotencyKeyColumns"));
+        }
+    }
+
+    public void testIncrementalWithInvalidIdempotencyKeyColumnThrows() {
+        MigrationContract c = buildValidContract();
+        TableMigration t = buildIncrementalTable();
+        t.getIncrementalConfig().setIdempotencyKeyColumns(Arrays.asList("id", "tenant-id"));
+        c.getTables().put("tabla_inc_key_invalida", t);
+        try {
+            ContractValidator.validate(c, validOrderFile);
+            fail("Se esperaba InvalidContractException por identificador SQL invalido en idempotencyKeyColumns.");
+        } catch (InvalidContractException e) {
+            assertTrue(e.getMessage().contains("idempotencyKeyColumns"));
+            assertTrue(e.getMessage().contains("identificador SQL"));
         }
     }
 

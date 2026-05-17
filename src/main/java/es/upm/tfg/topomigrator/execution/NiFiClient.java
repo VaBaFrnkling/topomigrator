@@ -38,6 +38,7 @@ public class NiFiClient {
     private final String baseUrl;
     private final String username;
     private final String password;
+    private final boolean allowInsecureLocalTls;
     private HttpClient httpClient;
     private String jwtToken;
 
@@ -58,6 +59,9 @@ public class NiFiClient {
             throw new IllegalStateException("La variable de entorno NIFI_PASSWORD es obligatoria y no está definida.");
         }
         this.password = envPass;
+        this.allowInsecureLocalTls = Boolean.parseBoolean(
+                System.getenv().getOrDefault("NIFI_ALLOW_INSECURE_LOCAL_TLS", "false")
+        );
 
         initializeClient();
     }
@@ -66,6 +70,7 @@ public class NiFiClient {
         this.baseUrl = baseUrl;
         this.username = username;
         this.password = password;
+        this.allowInsecureLocalTls = false;
         if (initializeClient) {
             initializeClient();
         }
@@ -77,6 +82,15 @@ public class NiFiClient {
      */
     private void initializeClient() {
         try {
+            HttpClient.Builder builder = HttpClient.newBuilder()
+                    .connectTimeout(Duration.ofSeconds(10));
+
+            if (!allowInsecureLocalTls) {
+                this.httpClient = builder.build();
+                logger.info("Cliente NiFi inicializado con validacion TLS estandar.");
+                return;
+            }
+
             TrustManager[] trustAllCerts = new TrustManager[]{
                 new X509TrustManager() {
                     public java.security.cert.X509Certificate[] getAcceptedIssuers() { return null; }
@@ -91,10 +105,10 @@ public class NiFiClient {
             // System property for allowing insecure hostnames with Java 11+ (usa jdk.internal pero es universal)
             System.setProperty("jdk.internal.httpclient.disableHostnameVerification", "true");
 
-            this.httpClient = HttpClient.newBuilder()
+            this.httpClient = builder
                     .sslContext(sslContext)
-                    .connectTimeout(Duration.ofSeconds(10))
                     .build();
+            logger.warn("Cliente NiFi inicializado con TLS inseguro permitido por NIFI_ALLOW_INSECURE_LOCAL_TLS=true.");
         } catch (Exception e) {
             logger.error("Error inicializando SSLContext para httpClient: {}", e.getMessage(), e);
             throw new RuntimeException(e);
