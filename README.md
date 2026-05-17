@@ -108,15 +108,15 @@ Ejemplo:
 changelogs/tables/public.customers.yaml
 ```
 
-5. Prepara el driver JDBC para NiFi.
+5. Verifica el driver JDBC para NiFi.
 
-El driver no se versiona en Git. Descarga o copia el JAR de PostgreSQL y dejalo en:
+El proyecto incluye el driver PostgreSQL esperado por el flujo NiFi en:
 
 ```text
 src/main/resources/db/drivers/postgresql-42.7.10.jar
 ```
 
-Docker Compose monta esa carpeta en el contenedor NiFi como `/opt/nifi/drivers`.
+Docker Compose monta esa carpeta en el contenedor NiFi como `/opt/nifi/drivers`, y las variables `SOURCE_DB_DRIVER_LOCATION` y `TARGET_DB_DRIVER_LOCATION` apuntan por defecto a `/opt/nifi/drivers/postgresql-42.7.10.jar`.
 
 ## Ejecutar la herramienta
 
