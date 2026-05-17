@@ -1,6 +1,7 @@
 package es.upm.tfg.topomigrator.execution;
 
 import es.upm.tfg.topomigrator.exceptions.InvalidChangelogException;
+import es.upm.tfg.topomigrator.model.ConnectionConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.util.DatabaseConnectionManager;
@@ -19,7 +20,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -36,6 +41,10 @@ public class LiquibaseSchemaExecutor {
      * destino para las tablas activas del contrato ya filtrado.
      */
     public static void applyTargetSchemas(MigrationContract contract) {
+        applyTargetSchemas(contract, DatabaseConnectionManager::getConnection);
+    }
+
+    static void applyTargetSchemas(MigrationContract contract, ConnectionFactory connectionFactory) {
         log.info("Fase de Liquibase: Iniciando despliegue de esquemas DDL en Destino para tablas activas.");
 
         if (contract == null || contract.getTables() == null || contract.getTables().isEmpty()) {
@@ -49,11 +58,11 @@ public class LiquibaseSchemaExecutor {
         Path changelogsDir = Paths.get(changelogsDirEnv);
         Map<String, Path> changelogPathsByTable = resolveChangelogPaths(contract, changelogsDir);
 
-        try (Connection targetConn = DatabaseConnectionManager.getConnection(contract.getDatabase().getTargetConnection());
+        try (Connection targetConn = connectionFactory.getConnection(contract.getDatabase().getTargetConnection());
              DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(changelogsDir.toAbsolutePath())) {
 
-            Database database = DatabaseFactory.getInstance()
-                    .findCorrectDatabaseImplementation(new JdbcConnection(targetConn));
+            DatabaseMetaData targetMeta = targetConn.getMetaData();
+            Database database = null;
 
             for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
                 String tableId = entry.getKey();
@@ -62,16 +71,28 @@ public class LiquibaseSchemaExecutor {
                 String targetTable = tableMigration.getTarget().getTable();
                 Path changelogPath = changelogPathsByTable.get(tableId);
 
+                if (tableExists(targetMeta, targetSchema, targetTable)) {
+                    log.warn("La tabla destino '{}.{}' ya existe. No se ejecuta su createTable de Liquibase; se validara su estructura despues.",
+                            targetSchema,
+                            targetTable);
+                    continue;
+                }
+
                 log.info("Ejecutando Liquibase -> Desplegando estructura para '{}.{}' usando {}",
                         targetSchema,
                         targetTable,
                         changelogPath.getFileName());
                 try {
+                    if (database == null) {
+                        database = DatabaseFactory.getInstance()
+                                .findCorrectDatabaseImplementation(new JdbcConnection(targetConn));
+                    }
+                    Database databaseForUpdate = database;
                     Map<String, Object> scopeAttrs = Map.of(
                             Scope.Attr.resourceAccessor.name(), resourceAccessor);
                     Scope.child(scopeAttrs, () -> {
                         new CommandScope("update")
-                                .addArgumentValue(DbUrlConnectionArgumentsCommandStep.DATABASE_ARG, database)
+                                .addArgumentValue(DbUrlConnectionArgumentsCommandStep.DATABASE_ARG, databaseForUpdate)
                                 .addArgumentValue(UpdateCommandStep.CHANGELOG_FILE_ARG,
                                         changelogPath.getFileName().toString())
                                 .execute();
@@ -86,7 +107,12 @@ public class LiquibaseSchemaExecutor {
         } catch (Exception e) {
             throw new RuntimeException("Fallo critico durante el despliegue de Liquibase en destino", e);
         }
-        log.info("Despliegue estructural de Liquibase completado. Las tablas destino activas han sido instanciadas.");
+        log.info("Despliegue estructural de Liquibase completado. Las tablas destino activas han sido creadas o detectadas como existentes.");
+    }
+
+    @FunctionalInterface
+    interface ConnectionFactory {
+        Connection getConnection(ConnectionConfig config) throws SQLException;
     }
 
     private static Map<String, Path> resolveChangelogPaths(MigrationContract contract, Path changelogsDir) {
@@ -121,5 +147,30 @@ public class LiquibaseSchemaExecutor {
             return exactMatch;
         }
         return null;
+    }
+
+    private static boolean tableExists(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        if (table == null || table.trim().isEmpty()) {
+            return false;
+        }
+
+        if (readTableExists(metaData, schema, table)) {
+            return true;
+        }
+
+        String upperSchema = schema != null ? schema.toUpperCase(Locale.ROOT) : null;
+        if (readTableExists(metaData, upperSchema, table.toUpperCase(Locale.ROOT))) {
+            return true;
+        }
+
+        String lowerSchema = schema != null ? schema.toLowerCase(Locale.ROOT) : null;
+        return readTableExists(metaData, lowerSchema, table.toLowerCase(Locale.ROOT));
+    }
+
+    private static boolean readTableExists(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        String schemaPattern = schema != null && !schema.trim().isEmpty() ? schema : null;
+        try (ResultSet rs = metaData.getTables(null, schemaPattern, table, new String[]{"TABLE"})) {
+            return rs.next();
+        }
     }
 }

@@ -19,16 +19,6 @@ release.properties
 /outputs/
 *.log
 
-# BMad / agent workspaces and generated planning artifacts
-/_bmad/
-/_bmad-output/
-/.agents/
-/.claude/
-/brief.md
-
-# Local documentation and delivery drafts
-/docs/
-
 # IDEs and editor metadata
 /.idea/
 /.vscode/

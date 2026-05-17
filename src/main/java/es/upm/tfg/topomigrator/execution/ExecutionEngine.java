@@ -6,7 +6,6 @@ import es.upm.tfg.topomigrator.audit.SummaryTrace;
 import es.upm.tfg.topomigrator.audit.TableTrace;
 import es.upm.tfg.topomigrator.audit.Timing;
 import es.upm.tfg.topomigrator.audit.TraceabilityManager;
-import es.upm.tfg.topomigrator.model.ConnectionConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.orchestration.dependency.ForeignKeyDependency;
@@ -711,36 +710,6 @@ public class ExecutionEngine {
 
     private String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
-    }
-
-    private boolean isBlank(String value) {
-        return value == null || value.trim().isEmpty();
-    }
-
-    private String defaultSchema(String schema) {
-        return schema != null && !schema.isBlank() ? schema : "public";
-    }
-
-    private String defaultValue(String value, String fallback) {
-        return value != null && !value.isBlank() ? value : fallback;
-    }
-
-    private String inferDatabaseType(ConnectionConfig connectionConfig) {
-        String driver = connectionConfig.getDriver() != null ? connectionConfig.getDriver().toLowerCase(Locale.ROOT) : "";
-        String url = connectionConfig.getJdbcUrl() != null ? connectionConfig.getJdbcUrl().toLowerCase(Locale.ROOT) : "";
-        if (driver.contains("oracle") || url.contains(":oracle:")) {
-            return "Oracle";
-        }
-        if (driver.contains("mysql") || url.contains(":mysql:")) {
-            return "MySQL";
-        }
-        if (driver.contains("mariadb") || url.contains(":mariadb:")) {
-            return "MariaDB";
-        }
-        if (driver.contains("sqlserver") || url.contains(":sqlserver:")) {
-            return "MS SQL 2012+";
-        }
-        return "PostgreSQL";
     }
 
 }

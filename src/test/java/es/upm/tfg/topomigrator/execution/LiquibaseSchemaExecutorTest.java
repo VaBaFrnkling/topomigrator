@@ -8,6 +8,11 @@ import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.model.TableRef;
 import junit.framework.TestCase;
 
+import java.lang.reflect.Proxy;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -97,6 +102,12 @@ public class LiquibaseSchemaExecutorTest extends TestCase {
         }
     }
 
+    public void testApplyTargetSchemasSkipsLiquibaseWhenTargetTableAlreadyExists() {
+        MigrationContract contract = contractWithTable("nombre_tabla_1", tableWithTarget("nombre_esquema", "nombre_tabla"));
+
+        LiquibaseSchemaExecutor.applyTargetSchemas(contract, config -> connectionWithExistingTable("nombre_esquema", "nombre_tabla"));
+    }
+
     private MigrationContract contractWithTable(String key, TableMigration table) {
         MigrationContract contract = new MigrationContract();
         DatabaseConfig database = new DatabaseConfig();
@@ -120,5 +131,88 @@ public class LiquibaseSchemaExecutorTest extends TestCase {
         target.setTable(tableName);
         table.setTarget(target);
         return table;
+    }
+
+    private Connection connectionWithExistingTable(String expectedSchema, String expectedTable) {
+        DatabaseMetaData metadata = (DatabaseMetaData) Proxy.newProxyInstance(
+                getClass().getClassLoader(),
+                new Class[]{DatabaseMetaData.class},
+                (proxy, method, args) -> {
+                    if ("getTables".equals(method.getName())) {
+                        String schema = (String) args[1];
+                        String table = (String) args[2];
+                        boolean exists = expectedSchema.equalsIgnoreCase(schema)
+                                && expectedTable.equalsIgnoreCase(table);
+                        return resultSet(exists);
+                    }
+                    return defaultValue(method.getReturnType());
+                });
+
+        return (Connection) Proxy.newProxyInstance(
+                getClass().getClassLoader(),
+                new Class[]{Connection.class},
+                (proxy, method, args) -> {
+                    if ("getMetaData".equals(method.getName())) {
+                        return metadata;
+                    }
+                    if ("close".equals(method.getName())) {
+                        return null;
+                    }
+                    if ("isClosed".equals(method.getName())) {
+                        return false;
+                    }
+                    throw new SQLException("Liquibase no debe usar la conexion cuando la tabla destino ya existe.");
+                });
+    }
+
+    private ResultSet resultSet(boolean hasRow) {
+        final boolean[] consumed = {false};
+        return (ResultSet) Proxy.newProxyInstance(
+                getClass().getClassLoader(),
+                new Class[]{ResultSet.class},
+                (proxy, method, args) -> {
+                    if ("next".equals(method.getName())) {
+                        if (!consumed[0] && hasRow) {
+                            consumed[0] = true;
+                            return true;
+                        }
+                        return false;
+                    }
+                    if ("close".equals(method.getName())) {
+                        return null;
+                    }
+                    return defaultValue(method.getReturnType());
+                });
+    }
+
+    private Object defaultValue(Class<?> returnType) {
+        if (!returnType.isPrimitive()) {
+            return null;
+        }
+        if (boolean.class.equals(returnType)) {
+            return false;
+        }
+        if (int.class.equals(returnType)) {
+            return 0;
+        }
+        if (long.class.equals(returnType)) {
+            return 0L;
+        }
+        if (double.class.equals(returnType)) {
+            return 0D;
+        }
+        if (float.class.equals(returnType)) {
+            return 0F;
+        }
+        if (short.class.equals(returnType)) {
+            return (short) 0;
+        }
+        if (byte.class.equals(returnType)) {
+            return (byte) 0;
+        }
+        if (char.class.equals(returnType)) {
+            return (char) 0;
+        }
+        return null;
     }
 }

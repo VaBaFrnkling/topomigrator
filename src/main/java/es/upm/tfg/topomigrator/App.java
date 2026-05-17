@@ -13,6 +13,7 @@ import es.upm.tfg.topomigrator.orchestration.dependency.TableNode;
 import es.upm.tfg.topomigrator.util.DatabaseConnectionManager;
 import es.upm.tfg.topomigrator.util.MigrationContractUtils;
 import es.upm.tfg.topomigrator.util.OutputCleaner;
+import es.upm.tfg.topomigrator.util.OutputDirectoryInitializer;
 import es.upm.tfg.topomigrator.util.TableIdentityUtils;
 import es.upm.tfg.topomigrator.validations.SchemaCompatibilityValidator;
 import es.upm.tfg.topomigrator.validations.TargetChangelogValidator;
@@ -38,6 +39,7 @@ public class App {
     }
 
     public static void main(String[] args) {
+        OutputDirectoryInitializer.ensureOutputDirectories();
         logger.info("Iniciando orquestador TopoMigrator...");
 
         // 0. Purgar rastros y reportes de ejecuciones previas (Clean Slate)
