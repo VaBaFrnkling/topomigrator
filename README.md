@@ -562,7 +562,7 @@ No borres ese fichero si quieres que las migraciones incrementales continúen de
 
 ## Relación con el TFG
 
-Este repositorio puede explicarse como un orquestador de migraciones batch basado en configuración declarativa. Las partes más relevantes para la memoria son:
+Este repositorio puede explicarse como un orquestador de migraciones batch basado en configuración declarativa. Algunas clases relevantes para este proyecto y que se explicane en la memoria son:
 
 - `App`: flujo principal de orquestación.
 - `ContractLoader`: carga de contrato y datasources.
