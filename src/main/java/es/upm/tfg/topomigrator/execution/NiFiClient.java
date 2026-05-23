@@ -184,6 +184,7 @@ public class NiFiClient {
 
         String boundary = "----NiFiFormBoundary" + System.currentTimeMillis();
         String crlf = "\r\n";
+        String clientId = "topomigrator-" + UUID.randomUUID();
 
         byte[] fileBytes = Files.readAllBytes(flowJsonPath);
         String fileContent = new String(fileBytes, StandardCharsets.UTF_8);
@@ -196,6 +197,11 @@ public class NiFiClient {
         }
 
         StringBuilder sb = new StringBuilder();
+
+        // Param: clientId
+        sb.append("--").append(boundary).append(crlf);
+        sb.append("Content-Disposition: form-data; name=\"clientId\"").append(crlf).append(crlf);
+        sb.append(clientId).append(crlf);
 
         // Param: groupName
         sb.append("--").append(boundary).append(crlf);
@@ -212,9 +218,9 @@ public class NiFiClient {
         sb.append("Content-Disposition: form-data; name=\"positionY\"").append(crlf).append(crlf);
         sb.append(positionY).append(crlf);
 
-        // Param: flowDefinition
+        // Param: file
         sb.append("--").append(boundary).append(crlf);
-        sb.append("Content-Disposition: form-data; name=\"flowDefinition\"; filename=\"flow.json\"").append(crlf);
+        sb.append("Content-Disposition: form-data; name=\"file\"; filename=\"flow.json\"").append(crlf);
         sb.append("Content-Type: application/json").append(crlf).append(crlf);
         sb.append(fileContent).append(crlf);
 
@@ -233,7 +239,15 @@ public class NiFiClient {
         if (response.statusCode() == 201 || response.statusCode() == 200) {
              logger.info("Flujo cargado exitosamente para el Process Group: {}", groupName);
              JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
-             return root.getAsJsonObject("processGroup").get("id").getAsString();
+             String processGroupId = firstNonBlank(
+                     extractComponentId(root),
+                     extractComponentId(getObject(root, "processGroup"))
+             );
+             if (processGroupId == null || processGroupId.isBlank()) {
+                 logger.error("Respuesta de upload de NiFi sin ID de Process Group para {}: {}", groupName, response.body());
+                 throw new RuntimeException("NiFi no devolvio el ID del Process Group cargado.");
+             }
+             return processGroupId;
         } else {
              logger.error("Error al cargar el flujo {}: Status {} - {}", groupName, response.statusCode(), response.body());
              throw new RuntimeException("No se pudo cargar el JSON del flujo de NiFi. Status: " + response.statusCode());
@@ -538,7 +552,7 @@ public class NiFiClient {
                 JsonObject serviceEntity = getControllerService(service.id);
                 ControllerServiceRef refreshed = toControllerServiceRef(serviceEntity);
                 if (!"DISABLED".equalsIgnoreCase(refreshed.state)) {
-                    disableControllerService(refreshed);
+                    changeControllerServiceRunStatus(refreshed, "DISABLED");
                 }
             }
 
@@ -558,6 +572,52 @@ public class NiFiClient {
         }
     }
 
+    public void enableControllerServicesRecursively(String processGroupId) throws Exception {
+        ensureAuthenticated();
+
+        int maxAttempts = 30;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            List<ControllerServiceRef> services = collectControllerServices(processGroupId, new LinkedHashSet<>());
+            if (services.isEmpty()) {
+                Thread.sleep(1000L);
+                continue;
+            }
+
+            List<ControllerServiceRef> pendingServices = new ArrayList<>();
+            for (ControllerServiceRef service : services) {
+                if (!"ENABLED".equalsIgnoreCase(service.state)) {
+                    pendingServices.add(service);
+                }
+            }
+
+            if (pendingServices.isEmpty()) {
+                return;
+            }
+
+            for (ControllerServiceRef service : pendingServices) {
+                JsonObject serviceEntity = getControllerService(service.id);
+                ControllerServiceRef refreshed = toControllerServiceRef(serviceEntity);
+                if (!"ENABLED".equalsIgnoreCase(refreshed.state) && !"ENABLING".equalsIgnoreCase(refreshed.state)) {
+                    changeControllerServiceRunStatus(refreshed, "ENABLED");
+                }
+            }
+
+            Thread.sleep(1000L);
+        }
+
+        List<ControllerServiceRef> stillPending = collectControllerServices(processGroupId, new LinkedHashSet<>());
+        List<String> notEnabled = new ArrayList<>();
+        for (ControllerServiceRef service : stillPending) {
+            if (!"ENABLED".equalsIgnoreCase(service.state)) {
+                notEnabled.add(service.name + " (" + service.id + ") estado=" + service.state);
+            }
+        }
+        if (!notEnabled.isEmpty()) {
+            throw new RuntimeException("No se pudieron habilitar todos los Controller Services del Process Group "
+                    + processGroupId + ": " + notEnabled);
+        }
+    }
+
     private List<ControllerServiceRef> collectControllerServices(String processGroupId, Set<String> visitedProcessGroups) throws Exception {
         String normalizedId = processGroupId == null ? null : processGroupId.trim();
         if (normalizedId == null || normalizedId.isEmpty() || !visitedProcessGroups.add(normalizedId)) {
@@ -568,8 +628,7 @@ public class NiFiClient {
         JsonObject processGroupFlowEntity = getObject(processGroupFlow, "processGroupFlow");
         JsonObject flow = getObject(processGroupFlowEntity, "flow");
 
-        List<ControllerServiceRef> services = new ArrayList<>();
-        collectControllerServicesFromFlow(flow, services);
+        List<ControllerServiceRef> services = new ArrayList<>(getControllerServicesForProcessGroup(normalizedId));
 
         if (flow != null && flow.has("processGroups") && flow.get("processGroups").isJsonArray()) {
             flow.getAsJsonArray("processGroups").forEach(processGroupElement -> {
@@ -591,16 +650,32 @@ public class NiFiClient {
         return services;
     }
 
-    private void collectControllerServicesFromFlow(JsonObject flow, List<ControllerServiceRef> services) {
-        if (flow == null || !flow.has("controllerServices") || !flow.get("controllerServices").isJsonArray()) {
-            return;
+    private List<ControllerServiceRef> getControllerServicesForProcessGroup(String processGroupId) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/flow/process-groups/" + processGroupId + "/controller-services"))
+                .header("Authorization", "Bearer " + jwtToken)
+                .header("Accept", "application/json")
+                .GET()
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            logger.error("No se pudieron listar los Controller Services del Process Group {}. HTTP {} - {}",
+                    processGroupId, response.statusCode(), response.body());
+            throw new RuntimeException("Error listando Controller Services del Process Group " + processGroupId
+                    + ": " + response.statusCode());
         }
 
-        flow.getAsJsonArray("controllerServices").forEach(controllerServiceElement -> {
-            if (controllerServiceElement != null && controllerServiceElement.isJsonObject()) {
-                services.add(toControllerServiceRef(controllerServiceElement.getAsJsonObject()));
-            }
-        });
+        JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
+        List<ControllerServiceRef> services = new ArrayList<>();
+        if (root.has("controllerServices") && root.get("controllerServices").isJsonArray()) {
+            root.getAsJsonArray("controllerServices").forEach(controllerServiceElement -> {
+                if (controllerServiceElement != null && controllerServiceElement.isJsonObject()) {
+                    services.add(toControllerServiceRef(controllerServiceElement.getAsJsonObject()));
+                }
+            });
+        }
+        return services;
     }
 
     private ControllerServiceRef toControllerServiceRef(JsonObject entity) {
@@ -628,12 +703,12 @@ public class NiFiClient {
         return new ControllerServiceRef(id, name != null ? name : id, version, state != null ? state : "UNKNOWN");
     }
 
-    private void disableControllerService(ControllerServiceRef service) throws Exception {
+    private void changeControllerServiceRunStatus(ControllerServiceRef service, String state) throws Exception {
         String clientId = "topomigrator-" + UUID.randomUUID();
         String payload = "{"
                 + "\"revision\":{\"clientId\":\"" + clientId + "\",\"version\":" + service.version + "},"
                 + "\"id\":\"" + service.id + "\","
-                + "\"state\":\"DISABLED\","
+                + "\"state\":\"" + state + "\","
                 + "\"disconnectedNodeAcknowledged\":false"
                 + "}";
 
@@ -646,9 +721,9 @@ public class NiFiClient {
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
-            logger.error("No se pudo deshabilitar el Controller Service {} ({}). HTTP {} - {}",
-                    service.name, service.id, response.statusCode(), response.body());
-            throw new RuntimeException("Error deshabilitando Controller Service " + service.name + ": HTTP "
+            logger.error("No se pudo cambiar el estado del Controller Service {} ({}) a {}. HTTP {} - {}",
+                    service.name, service.id, state, response.statusCode(), response.body());
+            throw new RuntimeException("Error cambiando estado del Controller Service " + service.name + ": HTTP "
                     + response.statusCode());
         }
     }

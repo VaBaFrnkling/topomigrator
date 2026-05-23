@@ -138,6 +138,7 @@ public class ExecutionEngine {
 
         Map<String, String> tableIdentityIndex = buildTableIdentityIndex(contract);
         Map<String, List<String>> parentsByTable = buildParentsByTable(dependencies, tableIdentityIndex);
+        summary.dependencyAnalysis = buildDependencyAnalysis(executionOrder, parentsByTable, tableIdentityIndex);
         Set<String> failedOrBlockedTables = new HashSet<>();
         RuntimeException criticalFailure = null;
 
@@ -249,6 +250,7 @@ public class ExecutionEngine {
 
         try {
             pgId = nifiClient.uploadFlowDefinition(rootId, groupName, yOffset, flowPath, flowConfigVariables);
+            nifiClient.enableControllerServicesRecursively(pgId);
             nifiClient.changeProcessGroupState(pgId, "RUNNING");
 
             monitorFlowUntilCompletion(pgId, tableName);
@@ -440,6 +442,34 @@ public class ExecutionEngine {
                     .add(canonicalTableKey(dependency.getParentTable(), tableIdentityIndex));
         }
         return parentsByTable;
+    }
+
+    private SummaryTrace.DependencyAnalysis buildDependencyAnalysis(List<TableNode> executionOrder,
+                                                                    Map<String, List<String>> parentsByTable,
+                                                                    Map<String, String> tableIdentityIndex) {
+        SummaryTrace.DependencyAnalysis analysis = new SummaryTrace.DependencyAnalysis();
+        analysis.independentTables = new ArrayList<>();
+        analysis.dependentTables = new LinkedHashMap<>();
+
+        if (executionOrder == null) {
+            return analysis;
+        }
+
+        for (TableNode tableNode : executionOrder) {
+            if (tableNode == null) {
+                continue;
+            }
+            String tableName = tableNode.getName();
+            String canonicalKey = canonicalTableKey(tableName, tableIdentityIndex);
+            List<String> parents = parentsByTable.getOrDefault(canonicalKey, List.of());
+            if (parents.isEmpty()) {
+                analysis.independentTables.add(tableName);
+            } else {
+                analysis.dependentTables.put(tableName, new ArrayList<>(parents));
+            }
+        }
+
+        return analysis;
     }
 
     private List<String> getBlockingParents(String tableName,

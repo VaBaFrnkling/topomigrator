@@ -1,0 +1,59 @@
+databaseChangeLog:
+  - changeSet:
+      id: 1
+      author: topomigrator
+      changes:
+        - createTable:
+            tableName: order_items
+            schemaName: public
+            columns:
+              - column:
+                  name: id
+                  type: int
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: order_id
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: product_id
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: quantity
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: unit_price
+                  type: numeric(10,2)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: subtotal
+                  type: numeric(12,2)
+              - column:
+                  name: created_at
+                  type: timestamp
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableSchemaName: public
+            baseTableName: order_items
+            baseColumnNames: order_id
+            referencedTableSchemaName: public
+            referencedTableName: orders
+            referencedColumnNames: id
+            constraintName: fk_order_items_order
+        - addForeignKeyConstraint:
+            baseTableSchemaName: public
+            baseTableName: order_items
+            baseColumnNames: product_id
+            referencedTableSchemaName: public
+            referencedTableName: products
+            referencedColumnNames: id
+            constraintName: fk_order_items_product

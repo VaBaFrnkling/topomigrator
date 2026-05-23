@@ -1,29 +1,46 @@
 migration:
-  name: "nombre_migracion"
-  description: "descripcion_de_la_migracion"
-  version: "version"
-  author: "nombre_del_autor"
+  name: "caso1-ecommerce"
+  description: "Migración full de modelo e-commerce: customers, products, orders, order_items"
+  version: "1.0"
+  author: "${USERNAME}"
 
 tables:
-  nombre_tabla_1:
+  customers:
     source:
-      schema: "nombre_esquema"
-      table: "nombre_tabla"
+      schema: "public"
+      table: "customers"
     target:
-      schema: "nombre_esquema"
-      table: "nombre_tabla"
+      schema: "public"
+      table: "customers"
     enabled: true
-    migrationType: "incremental" # valores permitidos: full | incremental
-    incrementalConfig:
-      column: "nombre_columna_incremental"
-      type: "timestamp"
-      startValue: "2026-01-01T00:00:00"
-      batchSize: 1000
-      # Estrategia por defecto recomendada para evitar duplicados en relanzamientos.
-      # Si se omite idempotencyKeyColumns, TopoMigrator intentará inferir la PK de destino.
-      # Si no hay PK ni idempotencyKeyColumns, la tabla falla para evitar un INSERT no idempotente.
-      loadStrategy: "upsert" # valores permitidos: upsert | append | append_only
-      idempotencyKeyColumns:
-        - "id"
-    filters:
-      where: "condicion SQL opcional"
+    migrationType: "full"
+
+  products:
+    source:
+      schema: "public"
+      table: "products"
+    target:
+      schema: "public"
+      table: "products"
+    enabled: true
+    migrationType: "full"
+
+  orders:
+    source:
+      schema: "public"
+      table: "orders"
+    target:
+      schema: "public"
+      table: "orders"
+    enabled: true
+    migrationType: "full"
+
+  order_items:
+    source:
+      schema: "public"
+      table: "order_items"
+    target:
+      schema: "public"
+      table: "order_items"
+    enabled: true
+    migrationType: "full"

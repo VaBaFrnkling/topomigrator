@@ -1,0 +1,56 @@
+databaseChangeLog:
+  - changeSet:
+      id: 1
+      author: topomigrator
+      changes:
+        - createTable:
+            tableName: orders
+            schemaName: public
+            columns:
+              - column:
+                  name: id
+                  type: int
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: customer_id
+                  type: int
+                  constraints:
+                    nullable: false
+              - column:
+                  name: order_date
+                  type: date
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(30)
+                  defaultValue: "pending"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: total_amount
+                  type: numeric(12,2)
+                  defaultValueNumeric: 0.00
+                  constraints:
+                    nullable: false
+              - column:
+                  name: shipping_city
+                  type: varchar(100)
+              - column:
+                  name: notes
+                  type: text
+              - column:
+                  name: created_at
+                  type: timestamp
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableSchemaName: public
+            baseTableName: orders
+            baseColumnNames: customer_id
+            referencedTableSchemaName: public
+            referencedTableName: customers
+            referencedColumnNames: id
+            constraintName: fk_orders_customer

@@ -1,18 +1,7 @@
-# ═══════════════════════════════════════════════════════════════════════════
-#  Configuración de conexiones JDBC a las bases de datos.
-#  Fichero: datasources.yaml
-#
-#  Seguridad:
-#  - Las credenciales se resuelven desde variables de entorno.
-#  - Puedes usar la sintaxis ${VAR} o ${VAR:valor_por_defecto}.
-#  - No se guardan contraseñas reales en este fichero.
-#
-#  NiFi:
-#  - driverLocation debe apuntar al .jar disponible dentro del contenedor NiFi.
-#  - databaseType alimenta PutDatabaseRecord. Por defecto se mantiene PostgreSQL
-#    porque el prototipo está validado sobre PostgreSQL, pero ya no queda fijado
-#    directamente en el JSON del flujo.
-# ═══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════
+#  Datasources para pruebas locales con DBeaver/PostgreSQL
+#  Ajusta el puerto y host si tu PostgreSQL no está en localhost:5432
+# ═══════════════════════════════════════════════════════════════════
 
 source:
   driver: ${SOURCE_DB_DRIVER:org.postgresql.Driver}
