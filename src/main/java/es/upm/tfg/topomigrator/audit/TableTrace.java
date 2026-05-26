@@ -8,7 +8,6 @@ public class TableTrace {
     public String tableExecutionId;
     public TableMapping table;
     public IncrementalInfo incrementalInfo;
-    public int executionOrder;
     public String migrationType;
     public String status;
     public long recordsProcessed;

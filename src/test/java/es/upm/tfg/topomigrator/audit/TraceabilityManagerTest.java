@@ -89,6 +89,7 @@ public class TraceabilityManagerTest extends TestCase {
         assertEquals("SUCCESS", obj.get("status").getAsString());
         assertEquals(42, obj.get("recordsProcessed").getAsLong());
         assertEquals("full", obj.get("migrationType").getAsString());
+        assertFalse(obj.has("executionOrder"));
     }
 
     /** Verifica que el mapeo source/target se serializa correctamente. */
@@ -239,7 +240,6 @@ public class TraceabilityManagerTest extends TestCase {
         TableTrace trace = new TableTrace();
         trace.executionId = "exec-test";
         trace.tableExecutionId = "exec-test-t1";
-        trace.executionOrder = 1;
         trace.migrationType = "full";
         trace.status = "SUCCESS";
         trace.recordsProcessed = 100;

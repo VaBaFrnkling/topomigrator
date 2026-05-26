@@ -197,7 +197,7 @@ public class ExecutionEngine {
                         }
                         tableTrace.errors.add("Estado final no canonico corregido automaticamente a FAILED.");
                     }
-                    summary.tableExecutionDetails.add(toSummary(tableName, tableTrace));
+                    summary.tableExecutionDetails.add(toSummary(tableName, tableTrace, orderCounter));
                     traceManager.writeTableTrace(tableTrace);
 
                     yOffset += 300;
@@ -583,7 +583,6 @@ public class ExecutionEngine {
         TableTrace tableTrace = new TableTrace();
         tableTrace.executionId = executionId;
         tableTrace.tableExecutionId = idGenerator.getTableExecutionId(orderCounter);
-        tableTrace.executionOrder = orderCounter;
         tableTrace.timing = new Timing();
         tableTrace.timing.startTime = LocalDateTime.now().format(formatter);
         tableTrace.auditMetrics = new TableTrace.AuditMetrics();
@@ -611,11 +610,11 @@ public class ExecutionEngine {
         return tableTrace;
     }
 
-    private SummaryTrace.TableExecutionSummary toSummary(String tableName, TableTrace tableTrace) {
+    private SummaryTrace.TableExecutionSummary toSummary(String tableName, TableTrace tableTrace, int executionOrder) {
         SummaryTrace.TableExecutionSummary s = new SummaryTrace.TableExecutionSummary();
         s.table = tableName;
         s.executionId = tableTrace.tableExecutionId;
-        s.order = tableTrace.executionOrder;
+        s.order = executionOrder;
         s.status = tableTrace.status;
         s.records = tableTrace.recordsProcessed;
         s.durationMs = tableTrace.timing.durationMs;

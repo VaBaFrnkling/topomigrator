@@ -101,7 +101,6 @@ public class ExecutionEngineTableTraceCompletenessTest extends TestCase {
     private void assertTraceBasics(TableTrace trace, String status) {
         assertNotNull(trace.executionId);
         assertNotNull(trace.tableExecutionId);
-        assertTrue(trace.executionOrder > 0);
         assertNotNull(trace.table);
         assertNotNull(trace.table.source);
         assertNotNull(trace.table.target);

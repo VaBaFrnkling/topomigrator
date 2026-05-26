@@ -73,6 +73,7 @@ public class ExecutionEngineCanonicalStateTest extends TestCase {
         }
         assertEquals(traceabilityManager.tableTraces.size(), tracesByExecutionId.size());
 
+        int expectedOrder = 1;
         for (SummaryTrace.TableExecutionSummary detail : traceabilityManager.summary.tableExecutionDetails) {
             assertTrue("Estado final no canonico en resumen: " + detail.status,
                     ExecutionEngine.isCanonicalFinalStatus(detail.status));
@@ -82,7 +83,7 @@ public class ExecutionEngineCanonicalStateTest extends TestCase {
             TableTrace trace = tracesByExecutionId.get(detail.executionId);
             assertNotNull("Cada detalle del resumen debe reconstruirse desde una traza", trace);
             assertEquals(trace.table.target.name, detail.table);
-            assertEquals(trace.executionOrder, detail.order);
+            assertEquals(expectedOrder++, detail.order);
             assertEquals(trace.status, detail.status);
             assertEquals(trace.recordsProcessed, detail.records);
             assertEquals(trace.timing.durationMs, detail.durationMs);

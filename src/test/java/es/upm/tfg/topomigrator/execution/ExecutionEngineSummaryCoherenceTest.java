@@ -69,7 +69,7 @@ public class ExecutionEngineSummaryCoherenceTest extends TestCase {
         SummaryTrace.TableExecutionSummary successDetail = summary.tableExecutionDetails.get(0);
         TableTrace successTrace = traceabilityManager.tableTraces.get(0);
         assertEquals(successTrace.tableExecutionId, successDetail.executionId);
-        assertEquals(successTrace.executionOrder, successDetail.order);
+        assertEquals(1, successDetail.order);
         assertEquals(successTrace.recordsProcessed, successDetail.records);
         assertEquals(successTrace.timing.durationMs, successDetail.durationMs);
         assertEquals(successTrace.auditMetrics.sourceSelectedRecords, successDetail.sourceSelectedRecords);
