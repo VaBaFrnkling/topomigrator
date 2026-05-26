@@ -464,7 +464,7 @@ mvn test
 Run one test class:
 
 ```bash
-mvn test -Dtest=ContractLoaderTest
+mvn test -Dtest=ContractLoaderQualityTest
 ```
 
 Build without tests:
@@ -472,6 +472,10 @@ Build without tests:
 ```bash
 mvn package -DskipTests
 ```
+
+The test suite is intentionally focused on behavior that can be checked without external infrastructure. It covers contract loading, contract validation, changelog validation, Liquibase preconditions, schema compatibility, dependency ordering, SQL generation, NiFi flow variable generation, incremental state, execution trace behavior, and table identifier normalization.
+
+The unit tests do not start NiFi, PostgreSQL, or Docker. NiFi-specific coverage validates the values TopoMigrator injects into the flow template; running the actual flow remains an integration concern handled by `run-topomigrator.sh`.
 
 ## Common Problems
 

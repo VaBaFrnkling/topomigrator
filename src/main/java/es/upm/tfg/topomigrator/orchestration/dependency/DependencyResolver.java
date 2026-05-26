@@ -4,7 +4,15 @@ import es.upm.tfg.topomigrator.exceptions.CycleDetectedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -31,19 +39,16 @@ public class DependencyResolver {
             return Collections.emptyList();
         }
 
-        // Normalizamos todas las tablas para facilitar comparaciones ignorando mayúsculas
         Set<String> normalizedIncluded = includedTables.stream()
                 .map(this::normalizeTableId)
                 .collect(Collectors.toCollection(LinkedHashSet::new));
 
         DependencyGraph graph = new DependencyGraph();
 
-        // 1. Inicializamos grafo con todos los nodos (incluyendo tablas huérfanas)
         for (String tableName : normalizedIncluded) {
             graph.addTable(new TableNode(tableName));
         }
 
-        // 2. Cargamos las aristas, ignorando dependencias de tablas ajenas a la migración actual
         int validEdges = 0;
         if (dependencies != null) {
             for (ForeignKeyDependency dep : dependencies) {
@@ -67,7 +72,6 @@ public class DependencyResolver {
         
         logger.info("Constructor de DAG finalizado internamente. Nodos instanciados: {}, Aristas válidas inyectadas: {}", normalizedIncluded.size(), validEdges);
 
-        // 3. Delegamos el ordenamiento topológico
         return applyKahnsAlgorithm(graph);
     }
 
@@ -88,23 +92,18 @@ public class DependencyResolver {
         
         List<TableNode> executionOrder = new ArrayList<>();
         
-        // El PriorityQueue garantiza una resolución determinista cuando múltiples
-        // nodos tienen grado de entrada 0 resolviendo empates por orden alfabético.
         PriorityQueue<TableNode> readyQueue = new PriorityQueue<>();
 
-        // Introducimos en la cola los nodos sin dependencias pendientes (in-degree = 0)
         for (Map.Entry<TableNode, Integer> entry : inDegree.entrySet()) {
             if (entry.getValue() == 0) {
                 readyQueue.add(entry.getKey());
             }
         }
 
-        // Procesamiento en cascada de la cola
         while (!readyQueue.isEmpty()) {
             TableNode current = readyQueue.poll();
             executionOrder.add(current);
 
-            // "Extraemos" el nodo disminuyendo las dependencias de sus hijos
             Set<TableNode> neighbors = adjacencyList.getOrDefault(current, Collections.emptySet());
             for (TableNode neighbor : neighbors) {
                 int newInDegree = inDegree.get(neighbor) - 1;
@@ -116,7 +115,6 @@ public class DependencyResolver {
             }
         }
 
-        // 4. Verificamos que el grafo carezca de ciclos
         if (executionOrder.size() != inDegree.size()) {
             List<String> cyclicTables = inDegree.entrySet().stream()
                     .filter(entry -> entry.getValue() > 0)
@@ -124,7 +122,7 @@ public class DependencyResolver {
                     .collect(Collectors.toList());
             
             String cycleMsg = "Se ha detectado una dependencia cíclica entre las tablas: " + String.join(", ", cyclicTables);
-            logger.error("¡COLAPSO DEL GRAFO! Imposible generar DAG. {}", cycleMsg);
+            logger.error("No se puede generar un DAG valido. {}", cycleMsg);
             throw new CycleDetectedException("No se pudo hallar un orden válido. " + cycleMsg);
         }
 

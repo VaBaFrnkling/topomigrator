@@ -87,27 +87,11 @@ public class ExecutionEngine {
         return STATUS_SUCCESS.equals(status) || STATUS_FAILED.equals(status) || STATUS_BLOCKED.equals(status);
     }
 
-    static boolean isInternalInitialStatus(String status) {
-        return STATUS_PENDING.equals(status);
-    }
-
-    static boolean isInformationalConsistencyStatus(String status) {
-        return CONSISTENCY_MATCH.equals(status)
-                || CONSISTENCY_MISMATCH.equals(status)
-                || CONSISTENCY_SOURCE_ONLY.equals(status)
-                || CONSISTENCY_TARGET_DELTA_ONLY.equals(status)
-                || CONSISTENCY_UNAVAILABLE.equals(status);
-    }
-
     private void ensureCanonicalFinalStatus(TableTrace tableTrace) {
         if (tableTrace == null || isCanonicalFinalStatus(tableTrace.status)) {
             return;
         }
         throw new IllegalStateException("Estado final de tabla no canonico: " + tableTrace.status);
-    }
-
-    public void executeMigration(List<TableNode> executionOrder, MigrationContract contract) {
-        executeMigration(executionOrder, contract, List.of());
     }
 
     public void executeMigration(List<TableNode> executionOrder, MigrationContract contract, List<ForeignKeyDependency> dependencies) {

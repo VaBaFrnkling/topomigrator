@@ -1,6 +1,10 @@
 package es.upm.tfg.topomigrator.orchestration.dependency;
 
-import java.util.*;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Representa el grafo dirigido acíclico (DAG) de las dependencias entre tablas.
@@ -9,10 +13,7 @@ import java.util.*;
  */
 public class DependencyGraph {
 
-    // Mapa desde una tabla padre hacia el conjunto de tablas que dependen de ella
     private final Map<TableNode, Set<TableNode>> adjacencyList;
-    
-    // Rastrea el grado de entrada (número de dependencias previas sin resolver) por nodo
     private final Map<TableNode, Integer> inDegree;
 
     public DependencyGraph() {
@@ -26,7 +27,7 @@ public class DependencyGraph {
      * @param table El nodo de la tabla a añadir.
      */
     public void addTable(TableNode table) {
-        adjacencyList.putIfAbsent(table, new TreeSet<>()); // TreeSet asegura iteración determinista
+        adjacencyList.putIfAbsent(table, new TreeSet<>());
         inDegree.putIfAbsent(table, 0);
     }
 
@@ -38,13 +39,10 @@ public class DependencyGraph {
      * @param dependent La tabla que depende de la tabla padre.
      */
     public void addDependency(TableNode parent, TableNode dependent) {
-        // Aseguramos que existan ambos nodos
         addTable(parent);
         addTable(dependent);
 
-        // Añadimos arista: padre -> dependiente
         if (adjacencyList.get(parent).add(dependent)) {
-            // Aumentamos el grado de entrada solo si la arista se añade con éxito (evito duplicados)
             inDegree.put(dependent, inDegree.get(dependent) + 1);
         }
     }

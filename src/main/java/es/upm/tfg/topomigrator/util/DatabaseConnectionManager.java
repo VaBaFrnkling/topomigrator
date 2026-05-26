@@ -46,7 +46,6 @@ public class DatabaseConnectionManager {
             }
         }
 
-        // 2. Intentar establecer la conexión
         log.info("Intentando conectar a la base de datos a traves de JDBC: {}", redactSecrets(jdbcUrl));
 
         Connection connection;

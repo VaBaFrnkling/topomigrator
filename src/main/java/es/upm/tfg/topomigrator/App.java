@@ -42,59 +42,48 @@ public class App {
         OutputDirectoryInitializer.ensureOutputDirectories();
         logger.info("Iniciando orquestador TopoMigrator...");
 
-        // 0. Purgar rastros y reportes de ejecuciones previas (Clean Slate)
         OutputCleaner.cleanOutputs();
 
         try {
-            // 1. Cargar el contrato completo
             String configPathEnv = System.getenv("MIGRATION_CONFIG_PATH");
             if (configPathEnv == null || configPathEnv.isEmpty()) {
-                configPathEnv = "configs/contract.yaml"; // Fallback por defecto
+                configPathEnv = "configs/contract.yaml";
             }
             Path configPath = Paths.get(configPathEnv);
 
             ContractLoader loader = new ContractLoader();
             MigrationContract loadedContract = loader.load(configPath);
 
-            // 2. Filtrar las tablas activas una sola vez
             MigrationContract contract = MigrationContractUtils.retainEnabledTables(loadedContract);
             if (contract.getTables() == null || contract.getTables().isEmpty()) {
                 throw new IllegalStateException("No hay tablas activas en el contrato de migración.");
             }
             logger.info("Tablas activas a procesar: {}", contract.getTables().keySet());
 
-            // 3. Pruebas de conexión JDBC previas a la migración
             DatabaseConfig database = requireDatabaseConfig(contract);
             DatabaseConnectionManager.testConnection(database.getSourceConnection(), "Base de Datos Origen");
             DatabaseConnectionManager.testConnection(database.getTargetConnection(), "Base de Datos Destino");
 
-            // 4. Validaciones preventivas de Fase 1 (Solo origen)
             SchemaCompatibilityValidator.validateSourceSchemas(contract);
 
-            // 5. Validar que existe un changelog por cada tabla destino activa
             TargetChangelogValidator.validate(contract);
 
-            // 6. Crear / validar las tablas destino activas con Liquibase
             LiquibaseSchemaExecutor.applyTargetSchemas(contract);
 
-            // 7. Validar el mapeo exacto ahora que el Destino tiene los diseños instalados
             SchemaCompatibilityValidator.validateTargetAndMapping(contract);
 
-            // 8. Construir mapeo de identidades físicas (schema.table) <-> claves del contrato
             Map<String, String> physicalToContractKey = new LinkedHashMap<>();
             for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
                 String physicalId = TableIdentityUtils.toSourcePhysicalId(entry.getValue());
                 physicalToContractKey.put(physicalId, entry.getKey());
             }
 
-            // 9. Conectar a la base de datos de origen para extraer metadatos de las tablas activas
             List<ForeignKeyDependency> rawDependencies;
             try (Connection sourceConnection = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection())) {
                 MetadataDependencyExtractor extractor = new MetadataDependencyExtractor();
                 rawDependencies = extractor.extractDependencies(sourceConnection, physicalToContractKey.keySet());
             }
 
-            // Convertir las dependencias de IDs físicos a claves lógicas del contrato
             List<ForeignKeyDependency> dependencies = new ArrayList<>();
             for (ForeignKeyDependency dep : rawDependencies) {
                 String logicalParent = physicalToContractKey.get(dep.getParentTable());
@@ -104,11 +93,9 @@ public class App {
                 }
             }
 
-            // 10. Resolver el Grafo de Dependencias (DAG + Algoritmo de Kahn)
             DependencyResolver resolver = new DependencyResolver();
             List<TableNode> executionOrder = resolver.resolveExecutionOrder(contract.getTables().keySet(), dependencies);
 
-            // 11. Motor de Ejecución: la migración de datos solo comienza si todo lo anterior fue bien
             ExecutionEngine engine = new ExecutionEngine();
             engine.executeMigration(executionOrder, contract, dependencies);
 

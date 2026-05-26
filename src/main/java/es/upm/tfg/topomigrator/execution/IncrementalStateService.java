@@ -52,10 +52,6 @@ public class IncrementalStateService {
         initializeDirectory();
     }
 
-    public Path getStateFile() {
-        return stateFile;
-    }
-
     public synchronized IncrementalState getState(String stateKey) {
         return loadAllStates().get(stateKey);
     }

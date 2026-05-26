@@ -31,10 +31,6 @@ public class TableMetricsService {
         return executeCount(contract.getDatabase().getSourceConnection(), countSql);
     }
 
-    public long countSourceSelectedRows(MigrationContract contract, TableMigration tableConfig) throws Exception {
-        return countSourceSelectedRows(contract, tableConfig, getConfiguredStartValue(tableConfig));
-    }
-
     public long countTargetRows(MigrationContract contract, TableMigration tableConfig) throws Exception {
         String qualifiedTarget = qualifyName(
                 tableConfig.getTarget().getSchema(),

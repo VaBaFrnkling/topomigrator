@@ -8,11 +8,9 @@ import es.upm.tfg.topomigrator.model.TableMigration;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 class FlowVariableBuilder {
@@ -58,30 +56,6 @@ class FlowVariableBuilder {
         flowConfigVariables.put("##QUERY_SQL##", metricsService.buildSourceSelectSql(tableConfig, effectiveIncrementalStartValue));
 
         return flowConfigVariables;
-    }
-
-    static Set<String> generatedTokens() {
-        Set<String> tokens = new LinkedHashSet<>();
-        tokens.add("##EXECUTION_ID##");
-        tokens.add("##TABLA_ORIGEN##");
-        tokens.add("##ESQUEMA_ORIGEN##");
-        tokens.add("##TABLA_DESTINO##");
-        tokens.add("##ESQUEMA_DESTINO##");
-        tokens.add("##SOURCE_DB_URL##");
-        tokens.add("##SOURCE_DB_USER##");
-        tokens.add("##SOURCE_DB_PASSWORD##");
-        tokens.add("##SOURCE_DB_DRIVER##");
-        tokens.add("##SOURCE_DB_DRIVER_LOCATION##");
-        tokens.add("##TARGET_DB_URL##");
-        tokens.add("##TARGET_DB_USER##");
-        tokens.add("##TARGET_DB_PASSWORD##");
-        tokens.add("##TARGET_DB_DRIVER##");
-        tokens.add("##TARGET_DB_DRIVER_LOCATION##");
-        tokens.add("##TARGET_DB_TYPE##");
-        tokens.add("##STATEMENT_TYPE##");
-        tokens.add("##UPDATE_KEYS##");
-        tokens.add("##QUERY_SQL##");
-        return tokens;
     }
 
     private void configureWriteMode(MigrationContract contract,

@@ -1,5 +1,5 @@
 migration:
-  name: "caso1-ecommerce"
+  name: "ecommerce-migration"
   description: "Migración full de modelo e-commerce: customers, products, orders, order_items"
   version: "1.0"
   author: "${USERNAME}"
