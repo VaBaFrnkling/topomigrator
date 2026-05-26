@@ -12,8 +12,7 @@
 #   outputs/logs/
 #   outputs/traces/
 #
-# No depende de test-data. Los pasos de preparacion de casos de test
-# se consideran obsoletos para este flujo y se saltan.
+# No depende de datos de prueba externos. Usa configs/ y changelogs/tables/.
 
 set -euo pipefail
 
@@ -48,7 +47,8 @@ TARGET_DB="${TARGET_DB:-topomigrator_target}"
 PG_USER="${PG_USER:-topomigrator_user}"
 PG_PASSWORD="${PG_PASSWORD:-Topomigrator123!}"
 PG_PORT="${PG_PORT:-5432}"
-PG_HOST_FOR_CONTAINERS="${PG_HOST_FOR_CONTAINERS:-${VM_PRIVATE_IP:-host.docker.internal}}"
+CONTAINER_DB_HOST="${CONTAINER_DB_HOST:-host.docker.internal}"
+PG_HOST_FOR_CONTAINERS="${PG_HOST_FOR_CONTAINERS:-$CONTAINER_DB_HOST}"
 
 SOURCE_DB_DRIVER="${SOURCE_DB_DRIVER:-org.postgresql.Driver}"
 TARGET_DB_DRIVER="${TARGET_DB_DRIVER:-org.postgresql.Driver}"
@@ -133,19 +133,14 @@ diagnose_on_failure() {
   fi
 
   log "ERROR: run-topomigrator.sh fallo con estado $status."
-  if script_exists "13-diagnose.sh"; then
-    log "Ejecutando diagnostico. No se borra el script diagnose."
-    bash "$SCRIPTS_DIR/13-diagnose.sh" 2>&1 | tee -a "$RUN_LOG" || true
-  else
-    log "No existe scripts/13-diagnose.sh; diagnostico basico:"
-    log "ROOT_DIR=$ROOT_DIR"
-    log "CONFIG_DIR=$CONFIG_DIR"
-    log "CHANGELOG_DIR=$CHANGELOG_DIR"
-    log "OUTPUTS_DIR=$OUTPUTS_DIR"
-    find "$OUTPUTS_DIR" -maxdepth 3 -type f -print 2>/dev/null | sort | tee -a "$RUN_LOG" || true
-    (cd "$ROOT_DIR" && docker compose ps) 2>&1 | tee -a "$RUN_LOG" || true
-    (cd "$ROOT_DIR" && docker compose logs --tail=120 topomigrator nifi) 2>&1 | tee -a "$RUN_LOG" || true
-  fi
+  log "Diagnostico basico:"
+  log "ROOT_DIR=$ROOT_DIR"
+  log "CONFIG_DIR=$CONFIG_DIR"
+  log "CHANGELOG_DIR=$CHANGELOG_DIR"
+  log "OUTPUTS_DIR=$OUTPUTS_DIR"
+  find "$OUTPUTS_DIR" -maxdepth 3 -type f -print 2>/dev/null | sort | tee -a "$RUN_LOG" || true
+  (cd "$ROOT_DIR" && docker compose ps) 2>&1 | tee -a "$RUN_LOG" || true
+  (cd "$ROOT_DIR" && docker compose logs --tail=120 topomigrator nifi) 2>&1 | tee -a "$RUN_LOG" || true
   exit "$status"
 }
 trap diagnose_on_failure EXIT
@@ -200,11 +195,6 @@ postgres_is_ready() {
   PGPASSWORD="$PG_PASSWORD" psql -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d "$TARGET_DB" -c "SELECT 1;" >/dev/null 2>&1
 }
 
-has_recent_trace() {
-  [[ "${FORCE_RUN:-false}" != "true" ]] &&
-  [[ -f "$TRACE_DIR/summary.json" || -f "$TRACE_DIR/.last_execution_id" ]]
-}
-
 log "Inicio run-topomigrator.sh"
 log "ROOT_DIR=$ROOT_DIR"
 log "SCRIPTS_DIR=$SCRIPTS_DIR"
@@ -234,13 +224,6 @@ run_step \
   "has_changelogs" \
   "echo 'ERROR: changelogs/tables no contiene archivos .yaml'; exit 1"
 
-log "SKIP: preparacion test-data no se ejecuta; este flujo usa configs/ y changelogs/tables/ reales."
-mark_done "04-skip-test-data"
-log "SKIP: preparacion de casos de prueba no se ejecuta."
-mark_done "06-skip-prepare-case"
-log "SKIP: carga SQL de casos de prueba no se ejecuta; la base real debe estar cargada previamente."
-mark_done "07-skip-load-test-sql"
-
 run_step \
   "08-postgres-ready" \
   "Comprobar PostgreSQL" \
@@ -267,15 +250,13 @@ run_step \
 run_step \
   "10-run-topomigrator" \
   "Ejecutar TopoMigrator" \
-  "has_recent_trace" \
-  "if script_exists '07-run-topomigrator.sh'; then run_script_if_available '07-run-topomigrator.sh'; else cd '$ROOT_DIR' && docker compose up --build --abort-on-container-exit; fi"
+  "false" \
+  "cd '$ROOT_DIR' && docker compose up --build --abort-on-container-exit"
 
 log "==> Comprobacion final"
-if script_exists "09-check-results.sh"; then
-  run_script_if_available "09-check-results.sh" "real-project"
-else
-  find "$OUTPUTS_DIR" -maxdepth 3 -type f -print 2>/dev/null | sort | tee -a "$RUN_LOG" || true
-fi
+find "$OUTPUTS_DIR" -maxdepth 3 -type f -print 2>/dev/null | sort | tee -a "$RUN_LOG" || true
+grep -RhoE 'SUCCESS|FAILED|BLOCKED' "$TRACE_DIR" "$ERROR_DIR" 2>/dev/null | sort | uniq -c | tee -a "$RUN_LOG" || log "AVISO: no encontre estados en trazas o errores."
+[[ -f "$STATE_DIR/incremental-state.json" ]] && log "OK: existe estado incremental." || log "INFO: no existe estado incremental."
 mark_done "11-check-results"
 
 log "OK: run-topomigrator.sh finalizado."
