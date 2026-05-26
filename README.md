@@ -1,88 +1,130 @@
 # TopoMigrator
 
-TopoMigrator es una herramienta Java/Maven de línea de comandos para orquestar migraciones batch entre bases de datos relacionales. El MVP está validado con PostgreSQL y usa un contrato YAML, validaciones previas, Liquibase, metadatos JDBC, Apache NiFi y trazas JSON para que la ejecución sea reproducible y auditable.
+TopoMigrator is a Java command-line tool for declarative batch migrations between relational databases. In this project it is validated with PostgreSQL as source and target, Apache NiFi as the data movement engine, Liquibase for target schema creation, and JSON traces for auditability.
 
-La herramienta no es una plataforma ETL completa. No tiene interfaz gráfica, no expone una API pública, no implementa CDC/tiempo real y no realiza transformaciones complejas de datos. Su objetivo es coordinar migraciones declarativas de tablas, preparar o validar el esquema destino, respetar dependencias relacionales y dejar evidencias de ejecución.
+The tool is not a general ETL platform. It does not provide a UI, a public API, CDC, real-time streaming, or complex data transformations. Its purpose is narrower: given a migration contract, it validates the inputs, prepares the target schema, computes table dependencies, executes the table migrations in a safe order, and leaves evidence of what happened.
 
-## Requisitos
+## Quick Start
 
-- Java 17.
-- Maven 3.x.
-- Docker y Docker Compose, si se quiere levantar Apache NiFi localmente.
-- Acceso JDBC a una base origen y una base destino.
-- PostgreSQL como SGBD validado para el MVP.
-- Driver JDBC de PostgreSQL disponible para NiFi en:
+The normal way to run the project is the root script:
 
-```text
-src/main/resources/db/drivers/postgresql-42.7.10.jar
+```bash
+./run-topomigrator.sh
 ```
 
-## Estructura principal
+Before running it, prepare these three things:
+
+1. Create `.env` in the project root.
+2. Put the migration YAML files in `configs/`.
+3. Put one Liquibase changelog per target table in `changelogs/tables/`.
+
+Minimum expected layout:
 
 ```text
-configs/contract.yaml       Contrato funcional de migración
-configs/datasources.yaml    Configuración técnica de conexiones JDBC
-changelogs/tables/          Changelogs Liquibase por tabla destino
-flows/MainMigration.json    Plantilla de flujo NiFi parametrizada
-src/main/java/              Código fuente Java
-src/test/java/              Tests unitarios e integración parcial
-outputs/                    Salidas generadas en ejecución
+topomigrator/
+  .env
+  run-topomigrator.sh
+  docker-compose.yaml
+  Dockerfile
+  configs/
+    contract.yaml
+    datasources.yaml
+  changelogs/
+    tables/
+      public.customers.yaml
+      public.orders.yaml
+  flows/
+    MainMigration.json
+  outputs/
 ```
 
-`outputs/`, `target/`, `.env`, `scripts/` y `test-data/` quedan ignorados por Git en este repositorio.
+The script validates the project structure, checks the YAML files, prepares local PostgreSQL databases when needed, ensures `.env` has the container paths expected by Docker Compose, runs the migration with Docker Compose, and then checks the generated results.
 
-## Arquitectura general
+Requirements:
 
-TopoMigrator separa la responsabilidad de la migración en varios bloques:
+- Bash: Linux, WSL, or Git Bash.
+- Docker with `docker compose`.
+- PostgreSQL reachable from the host and from the Docker containers.
+- `psql` available on the host if you want the helper checks and PostgreSQL setup to run.
+- Java 17 and Maven 3.x if you want to build or test locally outside Docker.
 
-| Bloque | Responsabilidad |
-|---|---|
-| Contrato YAML | Define qué tablas se migran, origen, destino, tipo de migración, filtros e incrementalidad. |
-| Datasources YAML | Define la configuración técnica de conexión a origen y destino. |
-| Validadores Java | Comprueban contrato, conexiones, existencia de tablas origen, changelogs y compatibilidad origen/destino. |
-| Liquibase | Crea las tablas destino cuando no existen y deja el esquema preparado antes de mover datos. |
-| JDBC Metadata | Extrae PK, FK y columnas para validar estructura y calcular dependencias. |
-| Dependencias | Ordena las tablas con un grafo dirigido y ordenación topológica. |
-| Apache NiFi | Ejecuta el movimiento físico de datos mediante `MainMigration.json`. |
-| Trazabilidad JSON | Genera resumen global, trazas por tabla y estado incremental. |
+On Windows, use WSL or Git Bash. The script is not a native PowerShell or `cmd` script.
 
-## Flujo interno de ejecución
+## What The Script Does
 
-El flujo real parte de `App.main()` y sigue estas fases:
+`run-topomigrator.sh` is the one-shot orchestrator. It lives in the repository root and should be the only script a normal user needs to execute.
 
-1. Inicializa la estructura `outputs/`.
-2. Limpia trazas, errores y flujos temporales de ejecuciones anteriores.
-3. Carga `configs/contract.yaml` o la ruta definida en `MIGRATION_CONFIG_PATH`.
-4. Carga `configs/datasources.yaml` o la ruta definida en `DATASOURCES_CONFIG_PATH`.
-5. Resuelve variables de entorno del tipo `${VAR}` o `${VAR:valor_por_defecto}`.
-6. Valida el contrato de migración.
-7. Filtra las tablas activas con `enabled: true`.
-8. Comprueba conexión JDBC contra origen y destino.
-9. Valida que las tablas origen existen.
-10. Valida que existe un changelog Liquibase por cada tabla destino activa.
-11. Aplica Liquibase para crear tablas destino que todavía no existen.
-12. Valida la compatibilidad estructural entre origen y destino.
-13. Extrae dependencias FK desde metadatos JDBC.
-14. Calcula el orden de ejecución con un grafo dirigido y algoritmo de Kahn.
-15. Ejecuta cada tabla en Apache NiFi siguiendo ese orden.
-16. Marca como `BLOCKED` las tablas que dependen de una tabla fallida o bloqueada.
-17. Genera trazas JSON por tabla y un resumen global.
-18. Actualiza el estado incremental solo en tablas incrementales ejecutadas correctamente.
+Effective flow:
 
-La migración de datos solo comienza si las fases previas terminan correctamente.
+1. Validates that it is running from a real TopoMigrator project root.
+2. Creates required output folders under `outputs/`.
+3. Checks that `configs/contract.yaml` and `configs/datasources.yaml` exist.
+4. Checks that `changelogs/tables/` contains YAML changelogs.
+5. Checks PostgreSQL connectivity using `psql`.
+6. If PostgreSQL is not ready, runs `scripts/02-postgres-setup.sh`.
+7. Optionally runs `scripts/03-postgres-docker-access.sh` when `CONFIGURE_POSTGRES_DOCKER_ACCESS=true`.
+8. Creates or refreshes `.env` through `scripts/04-write-env-file.sh` when needed.
+9. Runs `docker compose up --build --abort-on-container-exit`.
+10. Runs `scripts/09-check-results.sh` to summarize target tables, outputs, traces, and incremental state.
+11. If something fails, runs `scripts/13-diagnose.sh`.
 
-## Configuración
+The script resolves paths from its own location, not from the shell's current directory. Paths are quoted, and Windows-style paths passed through variables are normalized with `cygpath` when available.
 
-### 1. Contrato funcional: `configs/contract.yaml`
+Important: `scripts/02-postgres-setup.sh` and `scripts/03-postgres-docker-access.sh` use Linux administration commands such as `sudo`, `systemctl`, and the `postgres` system user. If your PostgreSQL is managed differently, create the databases/users yourself and provide the connection data in `.env`.
 
-El contrato define la información de la migración y las tablas a procesar. La sección `migration` debe aparecer antes de `tables`.
+## Environment File
 
-Ejemplo de migración completa:
+Create `.env` in the project root. Do not commit it.
+
+Example for the Docker Compose setup:
+
+```env
+SOURCE_DB_DRIVER=org.postgresql.Driver
+SOURCE_DB_DRIVER_LOCATION=/opt/nifi/drivers/postgresql-42.7.10.jar
+SOURCE_DB_TYPE=PostgreSQL
+SOURCE_DB_JDBC_URL=jdbc:postgresql://host.docker.internal:5432/topomigrator_source
+SOURCE_DB_USERNAME=topomigrator_user
+SOURCE_DB_PASSWORD=Topomigrator123!
+
+TARGET_DB_DRIVER=org.postgresql.Driver
+TARGET_DB_DRIVER_LOCATION=/opt/nifi/drivers/postgresql-42.7.10.jar
+TARGET_DB_TYPE=PostgreSQL
+TARGET_DB_JDBC_URL=jdbc:postgresql://host.docker.internal:5432/topomigrator_target
+TARGET_DB_USERNAME=topomigrator_user
+TARGET_DB_PASSWORD=Topomigrator123!
+
+NIFI_BASE_URL=https://nifi:8443/nifi-api
+NIFI_USERNAME=nifi_user
+NIFI_PASSWORD=Topomigrator123!Topomigrator123!
+NIFI_ALLOW_INSECURE_LOCAL_TLS=true
+
+MIGRATION_CONFIG_PATH=/app/configs/contract.yaml
+DATASOURCES_CONFIG_PATH=/app/configs/datasources.yaml
+INCREMENTAL_STATE_PATH=/app/outputs/state/incremental-state.json
+```
+
+Use `/app/...` paths for files read by the application inside the container. Those are correct because Docker Compose mounts the host folders into `/app`.
+
+For PostgreSQL host names:
+
+- `host.docker.internal` is usually correct for Docker Desktop.
+- In Linux or VM environments, you may need the host private IP instead.
+- You can set `CONTAINER_DB_HOST` or `PG_HOST_FOR_CONTAINERS` before running the script to change the default generated JDBC URLs.
+
+## Configuration Files
+
+TopoMigrator reads two YAML files from `configs/`.
+
+### `configs/contract.yaml`
+
+This file describes the migration from a functional point of view: what tables are migrated, where they come from, where they go, whether they are enabled, and whether the migration is full or incremental.
+
+Basic full migration:
 
 ```yaml
 migration:
-  name: "caso1-ecommerce"
-  description: "Migración full de modelo e-commerce"
+  name: "ecommerce-migration"
+  description: "Full migration of the ecommerce model"
   version: "1.0"
   author: "${USERNAME}"
 
@@ -96,20 +138,31 @@ tables:
       table: "customers"
     enabled: true
     migrationType: "full"
+
+  orders:
+    source:
+      schema: "public"
+      table: "orders"
+    target:
+      schema: "public"
+      table: "orders"
+    enabled: true
+    migrationType: "full"
 ```
 
-Valores admitidos en `migrationType`:
+Rules enforced by the validator:
 
-```text
-full
-incremental
-```
+- `migration` must exist.
+- `migration.name` and `migration.version` are required.
+- `migration` must appear before `tables` in the YAML file.
+- At least one table must be active with `enabled: true`.
+- `source.table` and `target.table` are required for active tables.
+- SQL identifiers may contain letters, numbers, and `_`, and must start with a letter or `_`.
+- `migrationType` must be `full` or `incremental`.
 
-Los identificadores SQL usados en `schema`, `table`, `column` e `idempotencyKeyColumns` deben empezar por letra o guion bajo y usar solo letras, números y guion bajo.
+### Incremental Tables
 
-### 2. Migraciones incrementales
-
-Una tabla incremental debe definir `incrementalConfig`:
+Incremental migration example:
 
 ```yaml
 tables:
@@ -132,38 +185,28 @@ tables:
         - "id"
 ```
 
-Funcionamiento real:
+How incremental mode works:
 
-- `column` indica la columna usada como cursor incremental.
-- `startValue` es obligatorio y se usa en la primera ejecución o si no existe estado previo.
-- Después de una ejecución correcta, TopoMigrator guarda el último valor procesado en `outputs/state/incremental-state.json`.
-- En ejecuciones posteriores, el estado persistido tiene prioridad sobre `startValue`.
-- La consulta incremental usa una condición equivalente a `column > valor`, orden ascendente y `LIMIT batchSize`.
-- Si `batchSize` no se indica, se usa `1000`.
-- El estado incremental solo avanza si la tabla termina en `SUCCESS`.
-- Si la tabla falla o queda bloqueada, el cursor no se actualiza.
+- `incrementalConfig.column` is the cursor column.
+- `startValue` is used for the first execution or when no previous state exists.
+- `batchSize` limits the selected records. If omitted, the code defaults to its configured behavior.
+- The generated selection uses the incremental cursor and orders by that cursor.
+- A successful table updates `outputs/state/incremental-state.json`.
+- Failed or blocked tables do not advance the incremental state.
 
-`type` existe en el modelo de configuración, pero actualmente no se usa para construir la SQL ni para aplicar validaciones específicas por tipo. Se conserva como campo descriptivo.
+Supported incremental load strategies:
 
-### 3. Estrategias de carga incremental
+```text
+upsert
+append
+append_only
+```
 
-`loadStrategy` admite:
+For `upsert`, TopoMigrator needs idempotency keys. It uses `idempotencyKeyColumns` when configured; otherwise it attempts to infer the target primary key. If it cannot determine keys, the table fails instead of risking silent duplicates.
 
-| Valor | Comportamiento |
-|---|---|
-| `upsert` | Usa `UPSERT` en NiFi. Es el valor por defecto si no se indica estrategia. |
-| `append` | Usa `INSERT`. No garantiza idempotencia ante reejecuciones. |
-| `append_only` | Usa `INSERT`. No garantiza idempotencia ante reejecuciones. |
+### Optional Filters
 
-Para `upsert`, TopoMigrator necesita claves de idempotencia. Se obtienen así:
-
-1. Primero usa `incrementalConfig.idempotencyKeyColumns`, si está informado.
-2. Si no está informado, intenta inferir la clave primaria de la tabla destino mediante JDBC.
-3. Si no hay claves configuradas ni PK detectable, la tabla falla para evitar duplicados silenciosos.
-
-### 4. Filtros SQL opcionales
-
-Cada tabla puede definir un filtro `where`:
+Tables may define a SQL `where` filter:
 
 ```yaml
 tables:
@@ -177,16 +220,14 @@ tables:
     enabled: true
     migrationType: "full"
     filters:
-      where: "country = 'España'"
+      where: "country = 'ES'"
 ```
 
-En migraciones completas, el filtro se añade como `WHERE`. En migraciones incrementales, se combina con el cursor incremental mediante `AND`.
+The filter is user-provided SQL. Review it carefully before running a migration.
 
-El filtro se inserta como condición SQL definida por el usuario. Debe revisarse antes de ejecutar la migración, porque no se construye mediante un DSL ni se parametriza automáticamente.
+### `configs/datasources.yaml`
 
-### 5. Configuración técnica: `configs/datasources.yaml`
-
-Las conexiones se separan del contrato funcional. El fichero de datasources contiene origen y destino:
+This file describes the technical connection settings. It usually references variables from `.env`.
 
 ```yaml
 source:
@@ -206,70 +247,30 @@ target:
   password: ${TARGET_DB_PASSWORD}
 ```
 
-Formato de variables soportado:
+Variable syntax:
 
 ```text
-${VAR}                 Variable obligatoria
-${VAR:valor_defecto}   Variable con valor por defecto
+${VAR}                 required variable
+${VAR:default_value}   optional variable with default
 ```
 
-Si una variable obligatoria no existe o está vacía, la carga del contrato falla.
+If a required variable is missing or empty, the loader stops the execution.
 
-### 6. Variables de entorno recomendadas
+## Liquibase Changelogs
 
-Crea un `.env` local. No subas este fichero al repositorio.
-
-```text
-SOURCE_DB_DRIVER=org.postgresql.Driver
-SOURCE_DB_DRIVER_LOCATION=/opt/nifi/drivers/postgresql-42.7.10.jar
-SOURCE_DB_TYPE=PostgreSQL
-SOURCE_DB_JDBC_URL=jdbc:postgresql://host-origen:5432/source_db
-SOURCE_DB_USERNAME=source_user
-SOURCE_DB_PASSWORD=source_password
-
-TARGET_DB_DRIVER=org.postgresql.Driver
-TARGET_DB_DRIVER_LOCATION=/opt/nifi/drivers/postgresql-42.7.10.jar
-TARGET_DB_TYPE=PostgreSQL
-TARGET_DB_JDBC_URL=jdbc:postgresql://host-destino:5432/target_db
-TARGET_DB_USERNAME=target_user
-TARGET_DB_PASSWORD=target_password
-
-NIFI_BASE_URL=https://nifi:8443/nifi-api
-NIFI_USERNAME=nifi_user
-NIFI_PASSWORD=nifi_password
-NIFI_ALLOW_INSECURE_LOCAL_TLS=true
-
-MIGRATION_CONFIG_PATH=configs/contract.yaml
-DATASOURCES_CONFIG_PATH=configs/datasources.yaml
-CHANGELOGS_DIR=changelogs/tables
-INCREMENTAL_STATE_PATH=outputs/state/incremental-state.json
-```
-
-`NIFI_ALLOW_INSECURE_LOCAL_TLS=true` está pensado para el NiFi local de Docker Compose con certificado autofirmado. En entornos con certificado válido, usa `false` u omite la variable.
-
-## Changelogs Liquibase
-
-Cada tabla destino activa debe tener un changelog con esta convención:
+Each active target table must have one changelog in:
 
 ```text
 changelogs/tables/<schema>.<table>.yaml
 ```
 
-Ejemplo:
+Example:
 
 ```text
 changelogs/tables/public.customers.yaml
 ```
 
-El validador exige que el fichero:
-
-- exista en `CHANGELOGS_DIR` o en `changelogs/tables` por defecto;
-- sea un YAML válido;
-- contenga la raíz `databaseChangeLog`;
-- contenga un `createTable` para la tabla destino esperada;
-- use el mismo `schemaName` y `tableName` definidos en `contract.yaml`.
-
-Ejemplo mínimo:
+Minimum changelog:
 
 ```yaml
 databaseChangeLog:
@@ -287,295 +288,251 @@ databaseChangeLog:
                   constraints:
                     primaryKey: true
                     nullable: false
+              - column:
+                  name: name
+                  type: varchar(255)
 ```
 
-Si la tabla destino ya existe, TopoMigrator no ejecuta el `createTable` de Liquibase para esa tabla. En ese caso continúa con la validación estructural entre origen y destino.
+The changelog validator checks that:
 
-## Validaciones previas
+- The file exists.
+- The YAML has a `databaseChangeLog` root.
+- It contains a `createTable` for the expected target table.
+- `schemaName` and `tableName` match the contract.
 
-Antes de ejecutar NiFi, la herramienta comprueba:
+If the target table already exists, the application continues with schema compatibility validation instead of blindly recreating it.
 
-- que el contrato YAML tiene `migration` y `tables`;
-- que hay al menos una tabla activa;
-- que `migrationType` es `full` o `incremental`;
-- que las migraciones incrementales tienen `column` y `startValue`;
-- que `loadStrategy` es válido;
-- que las conexiones JDBC de origen y destino funcionan;
-- que las tablas origen existen;
-- que hay changelogs Liquibase para las tablas destino activas;
-- que las tablas destino existen después de Liquibase;
-- que las columnas de origen existen en destino;
-- que los tipos JDBC son compatibles por familia;
-- que la longitud destino no es menor cuando la longitud es comparable;
-- que la nullability destino no es más restrictiva que la de origen;
-- que las PK y FK detectadas en origen se conservan en destino cuando aplica.
+## Runtime Architecture
 
-## Dependencias entre tablas
+The main Java entry point is `es.upm.tfg.topomigrator.App`.
 
-TopoMigrator extrae claves foráneas desde la base de datos origen usando `DatabaseMetaData.getImportedKeys`. Con esas relaciones construye un grafo dirigido:
+Internal execution flow:
 
-```text
-tabla_padre -> tabla_dependiente
-```
+1. Creates output directories.
+2. Cleans previous temporary traces, errors, and flow outputs.
+3. Loads `contract.yaml`.
+4. Loads `datasources.yaml`.
+5. Resolves environment placeholders.
+6. Validates the contract.
+7. Keeps only `enabled: true` tables.
+8. Tests source and target JDBC connections.
+9. Validates source schemas.
+10. Validates target changelog files.
+11. Applies target schema changes through Liquibase.
+12. Validates source-target schema compatibility.
+13. Reads foreign-key metadata from the source database.
+14. Computes a topological execution order.
+15. Executes each table in Apache NiFi.
+16. Blocks dependent tables if a parent table fails.
+17. Writes one table trace per table and one global summary.
+18. Updates incremental state after successful incremental tables.
 
-Después calcula el orden de ejecución mediante ordenación topológica. Si se detecta un ciclo, la ejecución se detiene porque no hay un orden seguro de migración.
+The data movement itself is delegated to Apache NiFi. Java orchestrates, validates, monitors, and audits.
 
-Durante la ejecución, si una tabla falla, las tablas dependientes que todavía no se han ejecutado se marcan como `BLOCKED`. Esto evita migrar tablas hijas cuando sus padres no se han migrado correctamente.
+## Apache NiFi
 
-## Integración con Apache NiFi
-
-El movimiento físico de datos se delega en Apache NiFi. Java no inserta directamente los registros en destino; Java orquesta y monitoriza el flujo.
-
-La plantilla base está en:
-
-```text
-flows/MainMigration.json
-```
-
-Antes de subir el flujo a NiFi, TopoMigrator sustituye tokens del tipo `##...##`, entre ellos:
-
-```text
-##EXECUTION_ID##
-##TABLA_ORIGEN##
-##ESQUEMA_ORIGEN##
-##TABLA_DESTINO##
-##ESQUEMA_DESTINO##
-##SOURCE_DB_URL##
-##SOURCE_DB_USER##
-##SOURCE_DB_PASSWORD##
-##SOURCE_DB_DRIVER##
-##SOURCE_DB_DRIVER_LOCATION##
-##TARGET_DB_URL##
-##TARGET_DB_USER##
-##TARGET_DB_PASSWORD##
-##TARGET_DB_DRIVER##
-##TARGET_DB_DRIVER_LOCATION##
-##TARGET_DB_TYPE##
-##STATEMENT_TYPE##
-##UPDATE_KEYS##
-##QUERY_SQL##
-```
-
-El cliente `NiFiClient` realiza estas operaciones:
-
-1. Autenticación contra `/access/token`.
-2. Obtención del root process group.
-3. Subida del flujo parametrizado.
-4. Activación de controller services.
-5. Arranque del process group.
-6. Monitorización de hilos activos y colas.
-7. Revisión de procesadores de fallo.
-8. Parada y limpieza del process group temporal.
-
-El flujo debe conservar procesadores de fallo con prefijo:
-
-```text
-NiFiFailure_
-```
-
-El monitor usa esos procesadores para detectar errores internos del flujo. Si no existen, la ejecución se considera insegura y puede fallar.
-
-## Ejecución
-
-### Opción A: Docker Compose
-
-Levanta NiFi y ejecuta la aplicación:
-
-```bash
-docker compose up --build
-```
-
-Docker Compose pasa al contenedor las variables `SOURCE_DB_*`, `TARGET_DB_*`, `NIFI_*`, `MIGRATION_CONFIG_PATH`, `DATASOURCES_CONFIG_PATH` e `INCREMENTAL_STATE_PATH` definidas en `.env`.
-
-Si falta una URL, usuario o contraseña obligatoria, Compose aborta antes de arrancar la aplicación.
-
-NiFi queda disponible en:
+Docker Compose starts Apache NiFi 2.9.0 and exposes it at:
 
 ```text
 https://localhost:8443/nifi
 ```
 
-### Opción B: Maven local
+The NiFi API used by TopoMigrator is:
 
-Compila el proyecto:
+```text
+https://nifi:8443/nifi-api
+```
+
+The flow template is:
+
+```text
+flows/MainMigration.json
+```
+
+Before uploading the flow to NiFi, TopoMigrator replaces tokens such as:
+
+```text
+##EXECUTION_ID##
+##QUERY_SQL##
+##TABLA_ORIGEN##
+##TABLA_DESTINO##
+##SOURCE_DB_URL##
+##SOURCE_DB_USER##
+##SOURCE_DB_PASSWORD##
+##TARGET_DB_URL##
+##TARGET_DB_USER##
+##TARGET_DB_PASSWORD##
+##STATEMENT_TYPE##
+##UPDATE_KEYS##
+```
+
+NiFi needs the PostgreSQL JDBC driver mounted at:
+
+```text
+/opt/nifi/drivers/postgresql-42.7.10.jar
+```
+
+Docker Compose maps that from:
+
+```text
+src/main/resources/db/drivers/
+```
+
+## Outputs
+
+Runtime outputs are written under `outputs/`.
+
+Important paths:
+
+```text
+outputs/logs/                               execution logs
+outputs/traces/summary.json                 global execution summary
+outputs/traces/tables/<schema>.<table>.json individual table traces
+outputs/errors/                             error artifacts
+outputs/flows/                              temporary flow artifacts
+outputs/state/incremental-state.json        persisted incremental cursor state
+```
+
+At startup, the Java application cleans temporary traces, errors, and flows. It keeps logs and incremental state.
+
+Table final statuses:
+
+```text
+SUCCESS   the table finished correctly
+FAILED    the table failed
+BLOCKED   the table was not executed because a dependency failed or was blocked
+```
+
+Audit consistency statuses:
+
+```text
+MATCH
+MISMATCH
+SOURCE_ONLY
+TARGET_DELTA_ONLY
+UNAVAILABLE
+```
+
+The global summary keeps the execution order and per-table execution details. Individual table traces intentionally do not expose `executionOrder`.
+
+## Scripts
+
+Current scripts:
+
+```text
+run-topomigrator.sh                 main one-shot runner
+scripts/01-env.sh                   shared environment defaults
+scripts/02-postgres-setup.sh        creates PostgreSQL role/databases when using local PostgreSQL
+scripts/03-postgres-docker-access.sh optional PostgreSQL host access setup for Docker
+scripts/04-write-env-file.sh        writes .env from the configured environment variables
+scripts/09-check-results.sh         prints target DB and output summaries
+scripts/13-diagnose.sh              failure diagnostics
+```
+
+Normal users should run only:
+
+```bash
+./run-topomigrator.sh
+```
+
+Use the helper scripts directly only when debugging or preparing a specific environment.
+
+## Running Without The Wrapper
+
+The wrapper is recommended. For debugging, you can run Docker Compose directly:
+
+```bash
+docker compose up --build --abort-on-container-exit
+```
+
+You can also build locally:
 
 ```bash
 mvn package
-```
-
-Ejecuta el JAR generado:
-
-```bash
 java -jar target/topomigrator-1.0-SNAPSHOT.jar
 ```
 
-También puedes ejecutar directamente con Maven:
+When running locally outside Docker, make sure `MIGRATION_CONFIG_PATH`, `DATASOURCES_CONFIG_PATH`, `INCREMENTAL_STATE_PATH`, and all datasource variables point to host paths and reachable JDBC URLs.
 
-```bash
-mvn test
-mvn package -DskipTests
-```
+## Tests
 
-## Outputs y ciclo de vida de salidas
-
-La aplicación crea automáticamente esta estructura si no existe:
-
-```text
-outputs/
-outputs/logs/
-outputs/errors/
-outputs/traces/
-outputs/traces/tables/
-outputs/flows/
-outputs/state/
-```
-
-Al inicio de cada ejecución se limpian ficheros de:
-
-```text
-outputs/traces/
-outputs/errors/
-outputs/flows/
-```
-
-No se limpian:
-
-```text
-outputs/logs/
-outputs/state/
-outputs/traces/.last_execution_id
-```
-
-Esto significa que:
-
-- las trazas anteriores se sustituyen en cada ejecución;
-- los errores antiguos se limpian;
-- el estado incremental se conserva;
-- los logs se conservan;
-- el contador interno de ejecuciones se conserva.
-
-Salidas principales:
-
-```text
-outputs/traces/summary.json                 Resumen global de la ejecución
-outputs/traces/tables/<schema>.<table>.json Traza individual por tabla destino
-outputs/state/incremental-state.json        Estado persistido de migraciones incrementales
-outputs/logs/                               Logs de la aplicación/NiFi cuando aplica
-```
-
-`outputs/flows/` se crea y se limpia como directorio de trabajo/reserva para artefactos de flujo, aunque la ejecución actual no depende de consultar ficheros generados ahí.
-
-## Interpretar resultados
-
-TopoMigrator usa tres estados finales de tabla:
-
-| Estado | Significado |
-|---|---|
-| `SUCCESS` | Tabla ejecutada correctamente en NiFi y auditada. |
-| `FAILED` | Tabla fallida por error Java, error NiFi, timeout, configuración insegura o resultado no válido. |
-| `BLOCKED` | Tabla no ejecutada porque depende de una tabla fallida o bloqueada. |
-
-Además, las métricas de auditoría pueden usar estos estados informativos:
-
-| Estado de auditoría | Significado |
-|---|---|
-| `MATCH` | Las filas seleccionadas en origen coinciden con el delta neto observado en destino. |
-| `MISMATCH` | La selección origen y el delta destino no coinciden. Se genera warning. |
-| `SOURCE_ONLY` | Solo se pudo calcular la métrica de origen. |
-| `TARGET_DELTA_ONLY` | Solo se pudo calcular el delta de destino. |
-| `UNAVAILABLE` | No se pudo calcular ninguna métrica de consistencia. |
-
-La métrica principal de registros procesados se basa en la consulta de origen equivalente a la enviada a NiFi. El delta de destino se usa como validación auxiliar, porque puede verse afectado por reejecuciones o escrituras concurrentes.
-
-## Pruebas
-
-Ejecutar toda la suite:
+Run the test suite:
 
 ```bash
 mvn test
 ```
 
-Ejecutar una clase concreta:
+Run one test class:
 
 ```bash
 mvn test -Dtest=ContractLoaderTest
 ```
 
-Ejecutar varias clases concretas:
-
-```bash
-mvn test -Dtest=DependencyResolverTest,DependencyGraphTest,ForeignKeyDependencyTest,TableNodeTest
-```
-
-Compilar sin ejecutar tests:
+Build without tests:
 
 ```bash
 mvn package -DskipTests
 ```
 
-La suite incluye pruebas sobre:
+## Common Problems
 
-- carga y validación del contrato;
-- resolución de variables de entorno;
-- validación de changelogs Liquibase;
-- compatibilidad de esquemas;
-- grafo y resolución de dependencias;
-- generación de trazas;
-- generación de IDs de ejecución;
-- limpieza e inicialización de `outputs/`;
-- clasificación de estados `SUCCESS`, `FAILED` y `BLOCKED`;
-- propagación de bloqueos por dependencias;
-- gestión del estado incremental;
-- coherencia del resumen global.
+`SOURCE_DB_JDBC_URL no configurado`
 
-## Limpieza local
+The `.env` file is missing the required datasource variable.
 
-Para borrar artefactos de build:
+`Faltan configs/contract.yaml o configs/datasources.yaml`
+
+Put both YAML files in `configs/`.
+
+`changelogs/tables no contiene archivos .yaml`
+
+Add one Liquibase changelog per active target table.
+
+`No existe databasechangelog`
+
+Liquibase may not have run, or the target database/schema is not the one you expected.
+
+`no pg_hba.conf entry`
+
+PostgreSQL is rejecting the Docker container connection. On Linux/WSL environments, try:
 
 ```bash
-mvn clean
+CONFIGURE_POSTGRES_DOCKER_ACCESS=true ./run-topomigrator.sh
 ```
 
-Para reiniciar trazas y errores, basta con lanzar de nuevo la aplicación: `OutputCleaner` limpia las salidas temporales al inicio.
+`host.docker.internal` does not resolve
 
-Para reiniciar completamente el estado incremental, elimina manualmente:
+Use the host IP in `SOURCE_DB_JDBC_URL` and `TARGET_DB_JDBC_URL`, or set `CONTAINER_DB_HOST` / `PG_HOST_FOR_CONTAINERS`.
+
+## Limitations
+
+- PostgreSQL is the validated database for this project.
+- The tool is batch-oriented, not streaming/CDC.
+- It does not perform complex transformations.
+- It does not provide a UI or API.
+- It does not guarantee distributed transactions across multiple tables.
+- Dependency ordering depends on physical foreign keys visible through JDBC metadata.
+- Consistency checks compare counts/deltas, not every record.
+- User-defined `where` filters are inserted as SQL conditions and must be reviewed.
+- The NiFi flow depends on token replacement in `flows/MainMigration.json`.
+
+## Main Code Areas
 
 ```text
-outputs/state/incremental-state.json
+App                         main orchestration flow
+ContractLoader              loads contract and datasources
+ContractValidator           validates contract rules
+TargetChangelogValidator    validates Liquibase changelog files
+LiquibaseSchemaExecutor     applies target schema changes
+SchemaCompatibilityValidator validates source/target compatibility
+MetadataDependencyExtractor extracts FK dependencies
+DependencyResolver          computes table execution order
+ExecutionEngine             runs table migrations and writes audit data
+NiFiClient                  talks to NiFi REST API
+FlowVariableBuilder         builds NiFi token values
+TableMetricsService         builds selection SQL and audit metrics
+IncrementalStateService     persists incremental cursor state
+TraceabilityManager         writes JSON traces
+OutputDirectoryInitializer  creates output folders
+OutputCleaner               cleans runtime outputs
 ```
-
-No borres ese fichero si quieres que las migraciones incrementales continúen desde el último cursor procesado.
-
-## Limitaciones del MVP
-
-- PostgreSQL es el SGBD validado en el proyecto.
-- No hay soporte real probado para migraciones multi-SGBD en producción.
-- No implementa CDC ni streaming en tiempo real.
-- No implementa transformaciones complejas, enriquecimiento o limpieza semántica de datos.
-- No ofrece interfaz gráfica ni diseñador visual de migraciones.
-- No expone API REST propia.
-- No garantiza transaccionalidad distribuida entre varias tablas.
-- La detección de dependencias depende de las FK físicas visibles por JDBC.
-- La validación de consistencia no compara registro a registro.
-- Los filtros `where` son SQL escrito por el usuario y deben revisarse cuidadosamente.
-- La parametrización del flujo NiFi se basa en sustitución de tokens `##...##` sobre el JSON de la plantilla.
-
-## Relación con el TFG
-
-Este repositorio puede explicarse como un orquestador de migraciones batch basado en configuración declarativa. Algunas clases relevantes para este proyecto y que se explicane en la memoria son:
-
-- `App`: flujo principal de orquestación.
-- `ContractLoader`: carga de contrato y datasources.
-- `ContractValidator`: validación funcional del YAML.
-- `TargetChangelogValidator`: validación de changelogs Liquibase.
-- `LiquibaseSchemaExecutor`: preparación del esquema destino.
-- `SchemaCompatibilityValidator`: validación estructural origen/destino.
-- `MetadataDependencyExtractor`: extracción de dependencias FK.
-- `DependencyResolver`: ordenación topológica.
-- `ExecutionEngine`: ejecución, auditoría y propagación de fallos.
-- `NiFiClient`: integración REST con Apache NiFi.
-- `FlowVariableBuilder`: generación de variables para la plantilla NiFi.
-- `TableMetricsService`: SQL de selección y métricas de auditoría.
-- `IncrementalStateService`: persistencia del cursor incremental.
-- `TraceabilityManager`: escritura de trazas JSON.
-- `OutputDirectoryInitializer` y `OutputCleaner`: ciclo de vida de salidas runtime.
