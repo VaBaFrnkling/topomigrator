@@ -410,13 +410,11 @@ public class TargetChangelogValidatorTest extends TestCase {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * Prueba de integración ligera: valida que el changelog real 'nombre_tabla.yaml'
+     * Prueba de integración ligera: valida que un changelog real del proyecto
      * y el contract.yaml del proyecto pasan correctamente TargetChangelogValidator.
      */
     public void testRealProjectChangelogPasses() {
-        // El contrato real del proyecto referencia target.schema = "nombre_esquema"
-        // y target.table = "nombre_tabla".
-        MigrationContract c = buildContractWithTarget("nombre_esquema", "nombre_tabla");
+        MigrationContract c = buildContractWithTarget("public", "customers");
         TargetChangelogValidator.validate(c);
     }
 }

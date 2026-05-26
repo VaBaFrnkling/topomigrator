@@ -103,9 +103,9 @@ public class LiquibaseSchemaExecutorTest extends TestCase {
     }
 
     public void testApplyTargetSchemasSkipsLiquibaseWhenTargetTableAlreadyExists() {
-        MigrationContract contract = contractWithTable("nombre_tabla_1", tableWithTarget("nombre_esquema", "nombre_tabla"));
+        MigrationContract contract = contractWithTable("customers", tableWithTarget("public", "customers"));
 
-        LiquibaseSchemaExecutor.applyTargetSchemas(contract, config -> connectionWithExistingTable("nombre_esquema", "nombre_tabla"));
+        LiquibaseSchemaExecutor.applyTargetSchemas(contract, config -> connectionWithExistingTable("public", "customers"));
     }
 
     private MigrationContract contractWithTable(String key, TableMigration table) {

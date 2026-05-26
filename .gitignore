@@ -27,7 +27,3 @@ release.properties
 .DS_Store
 Thumbs.db
 
-# Casos de prueba
-/test-data/
-/scripts/
-/outputs/

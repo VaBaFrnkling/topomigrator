@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# run-topomigrator.sh - Orquestador idempotente de TopoMigrator
+# run-topomigrator.sh - Orquestador de TopoMigrator
 # ============================================================
 # Debe vivir en la raiz del proyecto, al mismo nivel que configs,
 # changelogs, outputs, Dockerfile y docker-compose.yaml.
@@ -28,6 +28,14 @@ normalize_host_path() {
 }
 
 SCRIPTS_DIR="$(normalize_host_path "${TOPOMIGRATOR_SCRIPTS_DIR:-$ROOT_DIR/scripts}")"
+ENV_FILE="$ROOT_DIR/.env"
+
+if [[ -f "$ENV_FILE" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
 
 CONFIG_DIR="$ROOT_DIR/configs"
 CHANGELOG_DIR="$ROOT_DIR/changelogs/tables"
@@ -40,7 +48,6 @@ ERROR_DIR="$OUTPUTS_DIR/errors"
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 RUN_LOG="$LOG_DIR/run-topomigrator-$RUN_ID.log"
-STEPS_FILE="$LOG_DIR/run-topomigrator.steps"
 
 SOURCE_DB="${SOURCE_DB:-topomigrator_source}"
 TARGET_DB="${TARGET_DB:-topomigrator_target}"
@@ -73,56 +80,35 @@ DATASOURCES_CONFIG_PATH="${DATASOURCES_CONFIG_PATH:-/app/configs/datasources.yam
 INCREMENTAL_STATE_PATH="${INCREMENTAL_STATE_PATH:-/app/outputs/state/incremental-state.json}"
 
 mkdir -p "$LOG_DIR" "$TRACE_DIR" "$TRACE_DIR/tables" "$STATE_DIR" "$FLOW_DIR" "$ERROR_DIR"
-touch "$STEPS_FILE"
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$RUN_LOG"
 }
 
-step_done() {
-  grep -Fxq "$1" "$STEPS_FILE" 2>/dev/null
-}
-
-mark_done() {
-  step_done "$1" || printf '%s\n' "$1" >> "$STEPS_FILE"
-}
-
-script_exists() {
-  [[ -x "$SCRIPTS_DIR/$1" || -f "$SCRIPTS_DIR/$1" ]]
-}
-
-run_script_if_available() {
+run_script() {
   local script_name="$1"
   shift || true
-  if script_exists "$script_name"; then
-    log "Ejecutando script: scripts/$script_name $*"
-    bash "$SCRIPTS_DIR/$script_name" "$@" 2>&1 | tee -a "$RUN_LOG"
-  else
-    log "SKIP: scripts/$script_name no existe en $SCRIPTS_DIR"
+  if [[ ! -f "$SCRIPTS_DIR/$script_name" ]]; then
+    log "ERROR: falta scripts/$script_name en $SCRIPTS_DIR"
+    exit 1
   fi
+  log "Ejecutando script: scripts/$script_name $*"
+  bash "$SCRIPTS_DIR/$script_name" "$@" 2>&1 | tee -a "$RUN_LOG"
 }
 
 run_step() {
-  local key="$1"
-  local description="$2"
-  local check_command="$3"
-  local action_command="$4"
+  local description="$1"
+  local check_command="$2"
+  local action_command="$3"
 
   log "==> $description"
 
   if eval "$check_command"; then
     log "SKIP: $description ya estaba hecho."
-    mark_done "$key"
-    return 0
-  fi
-
-  if step_done "$key" && [[ "${FORCE_STEP_RERUN:-false}" != "true" ]]; then
-    log "SKIP: $description ya aparece como completado en $STEPS_FILE."
     return 0
   fi
 
   eval "$action_command"
-  mark_done "$key"
   log "OK: $description"
 }
 
@@ -144,30 +130,6 @@ diagnose_on_failure() {
   exit "$status"
 }
 trap diagnose_on_failure EXIT
-
-write_env_file() {
-  cat > "$ROOT_DIR/.env" <<ENV
-SOURCE_DB_DRIVER=$SOURCE_DB_DRIVER
-SOURCE_DB_DRIVER_LOCATION=$SOURCE_DB_DRIVER_LOCATION
-SOURCE_DB_TYPE=$SOURCE_DB_TYPE
-SOURCE_DB_JDBC_URL=$SOURCE_DB_JDBC_URL
-SOURCE_DB_USERNAME=$SOURCE_DB_USERNAME
-SOURCE_DB_PASSWORD=$SOURCE_DB_PASSWORD
-TARGET_DB_DRIVER=$TARGET_DB_DRIVER
-TARGET_DB_DRIVER_LOCATION=$TARGET_DB_DRIVER_LOCATION
-TARGET_DB_TYPE=$TARGET_DB_TYPE
-TARGET_DB_JDBC_URL=$TARGET_DB_JDBC_URL
-TARGET_DB_USERNAME=$TARGET_DB_USERNAME
-TARGET_DB_PASSWORD=$TARGET_DB_PASSWORD
-NIFI_BASE_URL=$NIFI_BASE_URL
-NIFI_USERNAME=$NIFI_USERNAME
-NIFI_PASSWORD=$NIFI_PASSWORD
-NIFI_ALLOW_INSECURE_LOCAL_TLS=$NIFI_ALLOW_INSECURE_LOCAL_TLS
-MIGRATION_CONFIG_PATH=$MIGRATION_CONFIG_PATH
-DATASOURCES_CONFIG_PATH=$DATASOURCES_CONFIG_PATH
-INCREMENTAL_STATE_PATH=$INCREMENTAL_STATE_PATH
-ENV
-}
 
 has_required_project_files() {
   [[ -f "$ROOT_DIR/Dockerfile" ]] &&
@@ -201,54 +163,45 @@ log "SCRIPTS_DIR=$SCRIPTS_DIR"
 log "RUN_LOG=$RUN_LOG"
 
 run_step \
-  "00-project-root" \
   "Validar raiz del proyecto" \
   "has_required_project_files" \
   "echo 'ERROR: ejecuta este script desde la raiz real de TopoMigrator.'; exit 1"
 
 run_step \
-  "01-directories" \
   "Crear carpetas reales del proyecto" \
   "[[ -d '$CONFIG_DIR' && -d '$CHANGELOG_DIR' && -d '$LOG_DIR' && -d '$STATE_DIR' && -d '$TRACE_DIR/tables' ]]" \
   "mkdir -p '$CONFIG_DIR' '$CHANGELOG_DIR' '$LOG_DIR' '$STATE_DIR' '$TRACE_DIR/tables' '$FLOW_DIR' '$ERROR_DIR'"
 
 run_step \
-  "02-configs" \
   "Validar configs reales" \
   "has_configs" \
   "echo 'ERROR: faltan configs/contract.yaml o configs/datasources.yaml'; exit 1"
 
 run_step \
-  "03-changelogs" \
   "Validar changelogs reales" \
   "has_changelogs" \
   "echo 'ERROR: changelogs/tables no contiene archivos .yaml'; exit 1"
 
 run_step \
-  "08-postgres-ready" \
   "Comprobar PostgreSQL" \
   "postgres_is_ready" \
-  "run_script_if_available '02-postgres-setup.sh'"
+  "run_script '02-postgres-setup.sh'"
 
 if [[ "${CONFIGURE_POSTGRES_DOCKER_ACCESS:-false}" == "true" ]]; then
   run_step \
-    "09-postgres-docker-access" \
     "Configurar acceso PostgreSQL desde Docker" \
     "false" \
-    "run_script_if_available '03-postgres-docker-access.sh'"
+    "run_script '03-postgres-docker-access.sh'"
 else
   log "SKIP: 03-postgres-docker-access.sh no se ejecuta automaticamente. Usa CONFIGURE_POSTGRES_DOCKER_ACCESS=true si lo necesitas."
-  mark_done "09-skip-postgres-docker-access"
 fi
 
 run_step \
-  "05-env-file" \
   "Generar .env con rutas del proyecto" \
   "env_is_current" \
-  "if script_exists '04-write-env-file.sh'; then run_script_if_available '04-write-env-file.sh'; else write_env_file; fi"
+  "run_script '04-write-env-file.sh'"
 
 run_step \
-  "10-run-topomigrator" \
   "Ejecutar TopoMigrator" \
   "false" \
   "cd '$ROOT_DIR' && docker compose up --build --abort-on-container-exit"
@@ -257,7 +210,6 @@ log "==> Comprobacion final"
 find "$OUTPUTS_DIR" -maxdepth 3 -type f -print 2>/dev/null | sort | tee -a "$RUN_LOG" || true
 grep -RhoE 'SUCCESS|FAILED|BLOCKED' "$TRACE_DIR" "$ERROR_DIR" 2>/dev/null | sort | uniq -c | tee -a "$RUN_LOG" || log "AVISO: no encontre estados en trazas o errores."
 [[ -f "$STATE_DIR/incremental-state.json" ]] && log "OK: existe estado incremental." || log "INFO: no existe estado incremental."
-mark_done "11-check-results"
 
 log "OK: run-topomigrator.sh finalizado."
 trap - EXIT

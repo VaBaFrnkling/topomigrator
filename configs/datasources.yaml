@@ -1,5 +1,5 @@
 # ═══════════════════════════════════════════════════════════════════
-#  Datasources para pruebas locales con DBeaver/PostgreSQL
+#  Datasources de TopoMigrator
 #  Ajusta el puerto y host si tu PostgreSQL no está en localhost:5432
 # ═══════════════════════════════════════════════════════════════════
 

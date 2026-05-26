@@ -74,13 +74,13 @@ public class ContractLoaderTest extends TestCase {
                 "  version: \"1.0\"\n" +
                 "  author: " + author + "\n" +
                 "tables:\n" +
-                "  nombre_tabla_1:\n" +
+                "  sample_table:\n" +
                 "    source:\n" +
                 "      schema: public\n" +
-                "      table: nombre_tabla\n" +
+                "      table: sample_table\n" +
                 "    target:\n" +
                 "      schema: public\n" +
-                "      table: nombre_tabla\n" +
+                "      table: sample_table\n" +
                 "    enabled: true\n" +
                 "    migrationType: full\n";
     }
@@ -142,8 +142,8 @@ public class ContractLoaderTest extends TestCase {
 
         assertNotNull(contract);
         assertNotNull(contract.getMigration());
-        assertEquals("nombre_migracion", contract.getMigration().getName());
-        assertEquals("version", contract.getMigration().getVersion());
+        assertEquals("caso1-ecommerce", contract.getMigration().getName());
+        assertEquals("1.0", contract.getMigration().getVersion());
         assertNotNull(contract.getTables());
         assertFalse(contract.getTables().isEmpty());
     }
@@ -153,10 +153,10 @@ public class ContractLoaderTest extends TestCase {
         Path contractPath = Path.of("configs/contract.yaml");
         MigrationContract contract = loader.load(contractPath);
 
-        assertTrue(contract.getTables().containsKey("nombre_tabla_1"));
-        assertNotNull(contract.getTables().get("nombre_tabla_1").getSource());
-        assertNotNull(contract.getTables().get("nombre_tabla_1").getTarget());
-        assertEquals("incremental", contract.getTables().get("nombre_tabla_1").getMigrationType());
+        assertTrue(contract.getTables().containsKey("customers"));
+        assertNotNull(contract.getTables().get("customers").getSource());
+        assertNotNull(contract.getTables().get("customers").getTarget());
+        assertEquals("full", contract.getTables().get("customers").getMigrationType());
     }
 
     // ═══════════════════════════════════════════════════════════════════
