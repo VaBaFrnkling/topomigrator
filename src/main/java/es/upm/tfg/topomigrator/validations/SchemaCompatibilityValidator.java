@@ -15,9 +15,11 @@ import java.sql.SQLException;
 import java.sql.Types;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Validador encargado de comprobar la compatibilidad estructural entre las tablas
@@ -115,7 +117,8 @@ public class SchemaCompatibilityValidator {
 
                 validateColumnsMapping(tableNameId, sourceColumns, targetColumns);
                 validatePrimaryKeys(tableNameId, sourceMeta, targetMeta, sourceSchema, sourceTable, targetSchema, targetTable);
-                validateForeignKeys(tableNameId, sourceMeta, targetMeta, sourceSchema, sourceTable, targetSchema, targetTable);
+                validateForeignKeys(tableNameId, contract, sourceMeta, targetMeta, sourceSchema, sourceTable, targetSchema, targetTable);
+                validateSimpleUniqueConstraints(tableNameId, sourceMeta, targetMeta, sourceSchema, sourceTable, targetSchema, targetTable);
             }
 
         } catch (SQLException e) {
@@ -213,10 +216,10 @@ public class SchemaCompatibilityValidator {
                                 source.name, tableNameId, source.columnSize, target.columnSize)
                 );
             }
-            if (source.nullable && !target.nullable) {
+            if (source.nullable != target.nullable) {
                 throw new SchemaCompatibilityException(
-                        String.format("La columna '%s' de la tabla '%s' tiene nullability destino mas restrictiva.",
-                                source.name, tableNameId)
+                        String.format("La columna '%s' de la tabla '%s' tiene nullability incompatible. Origen=%s Destino=%s",
+                                source.name, tableNameId, formatNullability(source.nullable), formatNullability(target.nullable))
                 );
             }
         }
@@ -240,19 +243,66 @@ public class SchemaCompatibilityValidator {
     }
 
     private static void validateForeignKeys(String tableNameId,
+                                            MigrationContract contract,
                                             DatabaseMetaData sourceMeta,
                                             DatabaseMetaData targetMeta,
                                             String sourceSchema,
                                             String sourceTable,
                                             String targetSchema,
                                             String targetTable) throws SQLException {
-        Set<String> sourceFkColumns = getImportedKeyColumns(sourceMeta, sourceSchema, sourceTable);
-        Set<String> targetFkColumns = getImportedKeyColumns(targetMeta, targetSchema, targetTable);
+        Map<String, TableReference> migratedSourceToTargetTables = buildMigratedSourceToTargetTableIndex(contract);
+        List<ForeignKeyMetadata> sourceForeignKeys = getImportedKeys(sourceMeta, sourceSchema, sourceTable);
+        List<ForeignKeyMetadata> targetForeignKeys = getImportedKeys(targetMeta, targetSchema, targetTable);
 
-        if (!sourceFkColumns.isEmpty() && !targetFkColumns.containsAll(sourceFkColumns)) {
-            throw new SchemaCompatibilityException("La tabla destino de '" + tableNameId
-                    + "' no conserva todas las columnas con clave foranea detectadas en origen. Origen="
-                    + sourceFkColumns + " Destino=" + targetFkColumns);
+        for (ForeignKeyMetadata sourceFk : sourceForeignKeys) {
+            TableReference expectedReferencedTarget = migratedSourceToTargetTables.get(normalizeQualifiedName(
+                    sourceFk.referencedSchema,
+                    sourceFk.referencedTable
+            ));
+            if (expectedReferencedTarget == null) {
+                continue;
+            }
+
+            ForeignKeyMetadata expectedFk = new ForeignKeyMetadata();
+            expectedFk.column = sourceFk.column;
+            expectedFk.referencedSchema = expectedReferencedTarget.schema;
+            expectedFk.referencedTable = expectedReferencedTarget.table;
+            expectedFk.referencedColumn = sourceFk.referencedColumn;
+
+            ForeignKeyMetadata matchingColumnFk = targetForeignKeys.stream()
+                    .filter(targetFk -> equalsNormalized(targetFk.column, sourceFk.column))
+                    .findFirst()
+                    .orElse(null);
+
+            if (matchingColumnFk == null || !foreignKeyTargetMatches(matchingColumnFk, expectedFk)) {
+                throw new SchemaCompatibilityException(
+                        String.format("La FK de la tabla '%s', columna '%s', es incompatible. FK origen esperada=%s FK destino=%s",
+                                tableNameId,
+                                sourceFk.column,
+                                formatForeignKey(expectedFk),
+                                matchingColumnFk != null ? formatForeignKey(matchingColumnFk) : "AUSENTE")
+                );
+            }
+        }
+    }
+
+    private static void validateSimpleUniqueConstraints(String tableNameId,
+                                                        DatabaseMetaData sourceMeta,
+                                                        DatabaseMetaData targetMeta,
+                                                        String sourceSchema,
+                                                        String sourceTable,
+                                                        String targetSchema,
+                                                        String targetTable) throws SQLException {
+        Set<String> sourceUniqueColumns = getSimpleUniqueColumns(sourceMeta, sourceSchema, sourceTable);
+        Set<String> targetUniqueColumns = getSimpleUniqueColumns(targetMeta, targetSchema, targetTable);
+
+        for (String sourceUniqueColumn : sourceUniqueColumns) {
+            if (!targetUniqueColumns.contains(sourceUniqueColumn)) {
+                throw new SchemaCompatibilityException(
+                        String.format("La columna '%s' de la tabla '%s' era UNIQUE en origen y no conserva UNIQUE simple en destino. Origen=%s Destino=%s",
+                                sourceUniqueColumn, tableNameId, sourceUniqueColumns, targetUniqueColumns)
+                );
+            }
         }
     }
 
@@ -303,18 +353,6 @@ public class SchemaCompatibilityValidator {
         return pkColumns;
     }
 
-    private static Set<String> getImportedKeyColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
-        Set<String> fkColumns = new HashSet<>();
-        readKeyColumns(metaData, schema, table, fkColumns, false);
-        if (fkColumns.isEmpty()) {
-            readKeyColumns(metaData, schema != null ? schema.toUpperCase(Locale.ROOT) : null, table.toUpperCase(Locale.ROOT), fkColumns, false);
-        }
-        if (fkColumns.isEmpty()) {
-            readKeyColumns(metaData, schema != null ? schema.toLowerCase(Locale.ROOT) : null, table.toLowerCase(Locale.ROOT), fkColumns, false);
-        }
-        return fkColumns;
-    }
-
     private static void readKeyColumns(DatabaseMetaData metaData,
                                        String schema,
                                        String table,
@@ -331,6 +369,103 @@ public class SchemaCompatibilityValidator {
                 }
             }
         }
+    }
+
+    private static List<ForeignKeyMetadata> getImportedKeys(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        List<ForeignKeyMetadata> foreignKeys = readImportedKeys(metaData, schema, table);
+        if (!foreignKeys.isEmpty()) {
+            return foreignKeys;
+        }
+
+        foreignKeys = readImportedKeys(metaData, schema != null ? schema.toUpperCase(Locale.ROOT) : null, table.toUpperCase(Locale.ROOT));
+        if (!foreignKeys.isEmpty()) {
+            return foreignKeys;
+        }
+
+        return readImportedKeys(metaData, schema != null ? schema.toLowerCase(Locale.ROOT) : null, table.toLowerCase(Locale.ROOT));
+    }
+
+    private static List<ForeignKeyMetadata> readImportedKeys(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        List<ForeignKeyMetadata> foreignKeys = new java.util.ArrayList<>();
+        String schemaPattern = schema != null && !schema.trim().isEmpty() ? schema : null;
+        try (ResultSet rs = metaData.getImportedKeys(null, schemaPattern, table)) {
+            while (rs.next()) {
+                ForeignKeyMetadata fk = new ForeignKeyMetadata();
+                fk.column = rs.getString("FKCOLUMN_NAME");
+                fk.referencedSchema = rs.getString("PKTABLE_SCHEM");
+                fk.referencedTable = rs.getString("PKTABLE_NAME");
+                fk.referencedColumn = rs.getString("PKCOLUMN_NAME");
+                if (!isBlank(fk.column) && !isBlank(fk.referencedTable) && !isBlank(fk.referencedColumn)) {
+                    foreignKeys.add(fk);
+                }
+            }
+        }
+        return foreignKeys;
+    }
+
+    private static Set<String> getSimpleUniqueColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        Set<String> uniqueColumns = readSimpleUniqueColumns(metaData, schema, table);
+        if (!uniqueColumns.isEmpty()) {
+            return uniqueColumns;
+        }
+
+        uniqueColumns = readSimpleUniqueColumns(metaData, schema != null ? schema.toUpperCase(Locale.ROOT) : null, table.toUpperCase(Locale.ROOT));
+        if (!uniqueColumns.isEmpty()) {
+            return uniqueColumns;
+        }
+
+        return readSimpleUniqueColumns(metaData, schema != null ? schema.toLowerCase(Locale.ROOT) : null, table.toLowerCase(Locale.ROOT));
+    }
+
+    private static Set<String> readSimpleUniqueColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
+        String schemaPattern = schema != null && !schema.trim().isEmpty() ? schema : null;
+        Map<String, Set<String>> columnsByIndex = new LinkedHashMap<>();
+        try (ResultSet rs = metaData.getIndexInfo(null, schemaPattern, table, true, false)) {
+            while (rs.next()) {
+                String columnName = rs.getString("COLUMN_NAME");
+                if (isBlank(columnName) || rs.getBoolean("NON_UNIQUE")) {
+                    continue;
+                }
+                String indexName = rs.getString("INDEX_NAME");
+                String indexKey = !isBlank(indexName) ? indexName : "unnamed_" + columnName;
+                columnsByIndex.computeIfAbsent(indexKey.toLowerCase(Locale.ROOT), ignored -> new HashSet<>())
+                        .add(columnName.toLowerCase(Locale.ROOT));
+            }
+        }
+
+        return columnsByIndex.values().stream()
+                .filter(columns -> columns.size() == 1)
+                .flatMap(Set::stream)
+                .collect(Collectors.toCollection(HashSet::new));
+    }
+
+    private static Map<String, TableReference> buildMigratedSourceToTargetTableIndex(MigrationContract contract) {
+        Map<String, TableReference> index = new LinkedHashMap<>();
+        for (TableMigration tableMigration : contract.getTables().values()) {
+            if (tableMigration == null || tableMigration.getSource() == null || tableMigration.getTarget() == null) {
+                continue;
+            }
+            index.put(
+                    normalizeQualifiedName(tableMigration.getSource().getSchema(), tableMigration.getSource().getTable()),
+                    new TableReference(tableMigration.getTarget().getSchema(), tableMigration.getTarget().getTable())
+            );
+        }
+        return index;
+    }
+
+    private static boolean foreignKeyTargetMatches(ForeignKeyMetadata actual, ForeignKeyMetadata expected) {
+        return equalsNormalized(actual.column, expected.column)
+                && equalsNormalized(actual.referencedTable, expected.referencedTable)
+                && equalsNormalized(actual.referencedColumn, expected.referencedColumn)
+                && (isBlank(expected.referencedSchema) || equalsNormalized(actual.referencedSchema, expected.referencedSchema));
+    }
+
+    private static String formatForeignKey(ForeignKeyMetadata fk) {
+        return fk.column + " -> " + formatTableName(fk.referencedSchema, fk.referencedTable) + "." + fk.referencedColumn;
+    }
+
+    private static String formatNullability(boolean nullable) {
+        return nullable ? "NULL" : "NOT NULL";
     }
 
     private static boolean areCompatibleTypes(int sourceType, int targetType) {
@@ -361,6 +496,18 @@ public class SchemaCompatibilityValidator {
         return value == null || value.trim().isEmpty();
     }
 
+    private static boolean equalsNormalized(String left, String right) {
+        return normalize(left).equals(normalize(right));
+    }
+
+    private static String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    private static String normalizeQualifiedName(String schema, String table) {
+        return normalize(formatTableName(schema, table));
+    }
+
     private static String formatTableName(String schema, String table) {
         return (schema != null && !schema.trim().isEmpty() ? schema + "." : "") + table;
     }
@@ -372,5 +519,15 @@ public class SchemaCompatibilityValidator {
         private Integer columnSize;
         private Integer decimalDigits;
         private boolean nullable;
+    }
+
+    private static final class ForeignKeyMetadata {
+        private String column;
+        private String referencedSchema;
+        private String referencedTable;
+        private String referencedColumn;
+    }
+
+    private record TableReference(String schema, String table) {
     }
 }
