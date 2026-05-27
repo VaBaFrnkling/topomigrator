@@ -97,6 +97,39 @@ public class ExecutionEngineQualityTest {
         assertEquals(List.of("Migracion_employees"), nifi.uploadedGroups);
     }
 
+    @Test
+    public void executeMigrationFailsWhenProcessGroupCleanupFailsAfterSuccessfulLoad() throws Exception {
+        RecordingNiFiClient nifi = new RecordingNiFiClient();
+        nifi.failCleanup = true;
+        RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
+        CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 20L)));
+        ExecutionEngine engine = engine(nifi, traces, metrics);
+        MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> engine.executeMigration(List.of(new TableNode("customers")), contract, List.of()));
+
+        assertTrue(error.getMessage().contains("tabla(s) fallida(s)"));
+        assertEquals("FAILED", traces.tableTraces.get(0).status);
+        assertTrue(traces.tableTraces.get(0).errors.get(0).contains("No se pudo limpiar"));
+    }
+
+    @Test
+    public void executeMigrationFailsBeforeUploadingWhenStaleProcessGroupsCannotBeCleaned() throws Exception {
+        RecordingNiFiClient nifi = new RecordingNiFiClient();
+        nifi.failStaleCleanup = true;
+        RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
+        CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 20L)));
+        ExecutionEngine engine = engine(nifi, traces, metrics);
+        MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> engine.executeMigration(List.of(new TableNode("customers")), contract, List.of()));
+
+        assertTrue(error.getMessage().contains("Fallo crítico general"));
+        assertEquals(List.of(), nifi.uploadedGroups);
+    }
+
     private ExecutionEngine engine(RecordingNiFiClient nifi, RecordingTraceabilityManager traces, CountingMetricsService metrics) throws Exception {
         Path stateFile = temporaryFolder.newFolder("state").toPath().resolve("incremental-state.json");
         return new ExecutionEngine(nifi, traces, metrics, new IncrementalStateService(stateFile), 0L, 0L, 5);
@@ -120,6 +153,8 @@ public class ExecutionEngineQualityTest {
     private static final class RecordingNiFiClient extends NiFiClient {
         private final List<String> uploadedGroups = new ArrayList<>();
         private String failUploadsForTable;
+        private boolean failCleanup;
+        private boolean failStaleCleanup;
 
         private RecordingNiFiClient() {
             super("https://nifi.invalid/nifi-api", "user", "password", false);
@@ -132,6 +167,13 @@ public class ExecutionEngineQualityTest {
         @Override
         public String getRootProcessGroupId() {
             return "root";
+        }
+
+        @Override
+        public void cleanupStaleTopomigratorProcessGroups(String rootProcessGroupId) {
+            if (failStaleCleanup) {
+                throw new RuntimeException("stale NiFi state could not be cleaned");
+            }
         }
 
         @Override
@@ -171,6 +213,9 @@ public class ExecutionEngineQualityTest {
 
         @Override
         public void cleanupProcessGroup(String processGroupId) {
+            if (failCleanup) {
+                throw new RuntimeException("cleanup failed");
+            }
         }
     }
 

@@ -430,6 +430,28 @@ public class NiFiClient {
         }
     }
 
+    private long sumMetric(JsonElement element, String... keys) {
+        if (element == null || element.isJsonNull()) {
+            return 0L;
+        }
+
+        long total = 0L;
+        if (element.isJsonObject()) {
+            JsonObject object = element.getAsJsonObject();
+            for (String key : keys) {
+                total += parseLongMetric(getString(object, key));
+            }
+            for (Map.Entry<String, JsonElement> entry : object.entrySet()) {
+                total += sumMetric(entry.getValue(), keys);
+            }
+        } else if (element.isJsonArray()) {
+            for (JsonElement child : element.getAsJsonArray()) {
+                total += sumMetric(child, keys);
+            }
+        }
+        return total;
+    }
+
 
     /**
      * Limpia el Process Group temporal para no acumular grupos en el canvas de NiFi.
@@ -444,27 +466,30 @@ public class NiFiClient {
 
         logger.info("Iniciando limpieza del Process Group temporal {} en NiFi.", processGroupId);
 
-        try {
-            changeProcessGroupState(processGroupId, "STOPPED");
-        } catch (Exception e) {
-            logger.warn("No se pudo detener el Process Group {} antes de limpiarlo: {}", processGroupId, e.getMessage());
-        }
-
-        try {
-            emptyAllConnections(processGroupId);
-        } catch (Exception e) {
-            logger.warn("No se pudieron vaciar todas las colas del Process Group {}: {}", processGroupId, e.getMessage());
-        }
-
-        try {
-            disableControllerServicesRecursively(processGroupId);
-        } catch (Exception e) {
-            logger.warn("No se pudieron deshabilitar todos los Controller Services del Process Group {}: {}",
-                    processGroupId, e.getMessage());
-        }
-
+        changeProcessGroupState(processGroupId, "STOPPED");
+        waitForProcessGroupStopped(processGroupId);
+        emptyAllConnections(processGroupId);
+        assertNoQueuedFlowFiles(processGroupId);
+        disableControllerServicesRecursively(processGroupId);
         deleteProcessGroup(processGroupId);
         logger.info("Process Group {} eliminado de NiFi correctamente.", processGroupId);
+    }
+
+    public void cleanupStaleTopomigratorProcessGroups(String rootProcessGroupId) throws Exception {
+        ensureAuthenticated();
+
+        List<ProcessGroupRef> staleGroups = collectTopomigratorProcessGroups(rootProcessGroupId);
+        if (staleGroups.isEmpty()) {
+            logger.info("No hay Process Groups residuales de TopoMigrator en NiFi.");
+            return;
+        }
+
+        logger.warn("Detectados {} Process Groups residuales de TopoMigrator. Se limpiaran antes de iniciar una nueva ejecucion.",
+                staleGroups.size());
+        for (ProcessGroupRef group : staleGroups) {
+            logger.warn("Limpiando Process Group residual {} ({})", group.name, group.id);
+            cleanupProcessGroup(group.id);
+        }
     }
 
     public JsonObject getProcessGroup(String processGroupId) throws Exception {
@@ -505,6 +530,67 @@ public class NiFiClient {
         logger.error("No se pudo obtener el flow del Process Group {}. HTTP {} - {}",
                 processGroupId, response.statusCode(), response.body());
         throw new RuntimeException("Error obteniendo flow del Process Group " + processGroupId + ": " + response.statusCode());
+    }
+
+    private List<ProcessGroupRef> collectTopomigratorProcessGroups(String rootProcessGroupId) throws Exception {
+        List<ProcessGroupRef> result = new ArrayList<>();
+        collectTopomigratorProcessGroups(rootProcessGroupId, result, new LinkedHashSet<>());
+        return result;
+    }
+
+    private void collectTopomigratorProcessGroups(String processGroupId,
+                                                  List<ProcessGroupRef> result,
+                                                  Set<String> visitedGroups) throws Exception {
+        if (processGroupId == null || processGroupId.isBlank() || !visitedGroups.add(processGroupId)) {
+            return;
+        }
+
+        JsonObject processGroupFlow = getProcessGroupFlow(processGroupId);
+        JsonObject processGroupFlowEntity = getObject(processGroupFlow, "processGroupFlow");
+        JsonObject flow = getObject(processGroupFlowEntity, "flow");
+        if (flow == null || !flow.has("processGroups") || !flow.get("processGroups").isJsonArray()) {
+            return;
+        }
+
+        for (JsonElement groupElement : flow.getAsJsonArray("processGroups")) {
+            if (groupElement == null || !groupElement.isJsonObject()) {
+                continue;
+            }
+            JsonObject groupEntity = groupElement.getAsJsonObject();
+            JsonObject component = getObject(groupEntity, "component");
+            String childId = extractComponentId(groupEntity);
+            String name = firstNonBlank(getString(component, "name"), getString(groupEntity, "name"));
+            if (childId == null || childId.isBlank()) {
+                continue;
+            }
+            if (name != null && name.startsWith("Migracion_")) {
+                result.add(new ProcessGroupRef(childId, name));
+                continue;
+            }
+            collectTopomigratorProcessGroups(childId, result, visitedGroups);
+        }
+    }
+
+    private void waitForProcessGroupStopped(String processGroupId) throws Exception {
+        int maxPolls = 30;
+        for (int i = 0; i < maxPolls; i++) {
+            JsonObject status = getProcessGroupStatus(processGroupId, true);
+            long activeThreads = sumMetric(status, "activeThreadCount");
+            if (activeThreads == 0) {
+                return;
+            }
+            Thread.sleep(1000L);
+        }
+        throw new RuntimeException("Timeout esperando a que el Process Group " + processGroupId + " quede sin hilos activos.");
+    }
+
+    private void assertNoQueuedFlowFiles(String processGroupId) throws Exception {
+        JsonObject status = getProcessGroupStatus(processGroupId, true);
+        long queued = sumMetric(status, "queuedCount", "flowFilesQueued");
+        if (queued > 0) {
+            throw new RuntimeException("El Process Group " + processGroupId
+                    + " conserva " + queued + " FlowFile(s) en cola tras intentar vaciarlo.");
+        }
     }
 
     public JsonObject getControllerService(String controllerServiceId) throws Exception {
@@ -732,18 +818,23 @@ public class NiFiClient {
         JsonObject requestEntity = createDropAllFlowFilesRequest(processGroupId);
         String dropRequestId = extractDropRequestId(requestEntity);
         if (dropRequestId == null || dropRequestId.isBlank()) {
-            logger.info("NiFi no devolvió dropRequestId al vaciar colas del Process Group {}. Se continúa con el borrado.",
-                    processGroupId);
-            return;
+            throw new RuntimeException("NiFi no devolvio dropRequestId al vaciar colas del Process Group " + processGroupId);
         }
 
         int maxPolls = 60;
         for (int i = 0; i < maxPolls; i++) {
             JsonObject statusEntity = getDropAllFlowFilesRequest(processGroupId, dropRequestId);
             JsonObject dropRequest = getObject(statusEntity, "dropRequest");
+            String failureReason = getString(dropRequest, "failureReason");
+            if (failureReason != null && !failureReason.isBlank()) {
+                deleteDropAllFlowFilesRequest(processGroupId, dropRequestId);
+                throw new RuntimeException("NiFi fallo al vaciar colas del Process Group "
+                        + processGroupId + ": " + failureReason);
+            }
             boolean complete = dropRequest != null && dropRequest.has("complete") && dropRequest.get("complete").getAsBoolean();
             if (complete) {
                 deleteDropAllFlowFilesRequest(processGroupId, dropRequestId);
+                assertNoQueuedFlowFiles(processGroupId);
                 return;
             }
             Thread.sleep(1000L);
@@ -799,8 +890,10 @@ public class NiFiClient {
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         if (response.statusCode() != 200) {
-            logger.warn("No se pudo eliminar el drop request {} del Process Group {}. HTTP {} - {}",
+            logger.error("No se pudo eliminar el drop request {} del Process Group {}. HTTP {} - {}",
                     dropRequestId, processGroupId, response.statusCode(), response.body());
+            throw new RuntimeException("Error eliminando drop request " + dropRequestId
+                    + " del Process Group " + processGroupId + ": " + response.statusCode());
         }
     }
 
@@ -897,6 +990,16 @@ public class NiFiClient {
             this.name = name;
             this.version = version;
             this.state = state;
+        }
+    }
+
+    private static final class ProcessGroupRef {
+        private final String id;
+        private final String name;
+
+        private ProcessGroupRef(String id, String name) {
+            this.id = id;
+            this.name = name;
         }
     }
 }

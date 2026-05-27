@@ -556,7 +556,7 @@
               "Unmatched Field Behavior": "Ignore Unmatched Fields",
               "Database Name": null,
               "Allow Multiple SQL Statements": "false",
-              "Rollback On Failure": "true",
+              "Rollback On Failure": "false",
               "Update Keys": "##UPDATE_KEYS##",
               "Field Containing SQL": null,
               "Database Dialect Service": null,
@@ -792,7 +792,7 @@
               "retry"
             ],
             "scheduledState": "ENABLED",
-            "retryCount": 10,
+            "retryCount": 0,
             "retriedRelationships": [],
             "backoffMechanism": "PENALIZE_FLOWFILE",
             "maxBackoffPeriod": "10 mins",

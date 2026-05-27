@@ -135,6 +135,7 @@ public class ExecutionEngine {
 
             nifiClient.authenticate();
             String rootId = nifiClient.getRootProcessGroupId();
+            nifiClient.cleanupStaleTopomigratorProcessGroups(rootId);
 
             int yOffset = 0;
             int orderCounter = 1;
@@ -231,6 +232,7 @@ public class ExecutionEngine {
         Map<String, String> flowConfigVariables = buildFlowVariables(executionId, contract, tableConfig, tableTrace, effectiveIncrementalStartValue);
         String groupName = "Migracion_" + tableName;
         String pgId = null;
+        Exception operationFailure = null;
 
         try {
             pgId = nifiClient.uploadFlowDefinition(rootId, groupName, yOffset, flowPath, flowConfigVariables);
@@ -249,13 +251,20 @@ public class ExecutionEngine {
             updateIncrementalStateIfNeeded(contract, tableName, tableConfig, effectiveIncrementalStartValue, tableTrace);
             tableTrace.status = STATUS_SUCCESS;
             logger.info("Tabla {} migrada correctamente. Registros auditados: {}", tableName, tableTrace.recordsProcessed);
+        } catch (Exception e) {
+            operationFailure = e;
+            throw e;
         } finally {
             if (pgId != null) {
                 try {
                     nifiClient.cleanupProcessGroup(pgId);
                 } catch (Exception cleanupEx) {
-                    logger.warn("No se pudo limpiar el Process Group {} tras la migración de {}: {}",
-                            pgId, tableName, cleanupEx.getMessage());
+                    if (operationFailure != null) {
+                        operationFailure.addSuppressed(cleanupEx);
+                    } else {
+                        throw new NiFiFlowFailureException("No se pudo limpiar de forma segura el Process Group "
+                                + pgId + " tras migrar " + tableName + ". La ejecucion se marca como fallida para evitar residuos NiFi.", cleanupEx);
+                    }
                 }
             }
         }
