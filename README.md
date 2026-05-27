@@ -475,7 +475,7 @@ mvn package -DskipTests
 
 The test suite is intentionally focused on behavior that can be checked without external infrastructure. It covers contract loading, contract validation, changelog validation, Liquibase preconditions, schema compatibility, dependency ordering, SQL generation, NiFi flow variable generation, incremental state, execution trace behavior, and table identifier normalization.
 
-The unit tests do not start NiFi, PostgreSQL, or Docker. NiFi-specific coverage validates the values TopoMigrator injects into the flow template; running the actual flow remains an integration concern handled by `run-topomigrator.sh`.
+The unit tests do not start NiFi, PostgreSQL, or Docker, and they do not depend on the YAML files under `configs/` or `changelogs/`. Tests create their own temporary contracts, datasource files, and changelogs. NiFi-specific coverage validates the values TopoMigrator injects into the flow template; running the actual flow remains an integration concern handled by `run-topomigrator.sh`.
 
 ## Common Problems
 

@@ -28,91 +28,94 @@ import java.util.Locale;
 import java.util.Map;
 
 /**
- * Ejecutor que conecta a la Base de Datos Destino y aplica manualmente
- * los ficheros de definicion de tablas Liquibase expuestos por el usuario.
- *
- * Convencion obligatoria: changelogs/tables/<schema>.<table>.yaml
+ * Applies one Liquibase changelog per active target table.
  */
 public class LiquibaseSchemaExecutor {
     private static final Logger log = LoggerFactory.getLogger(LiquibaseSchemaExecutor.class);
 
-    /**
-     * Despliega estructuralmente (DDL) los cambios de Liquibase en la Base de Datos
-     * destino para las tablas activas del contrato ya filtrado.
-     */
     public static void applyTargetSchemas(MigrationContract contract) {
         applyTargetSchemas(contract, DatabaseConnectionManager::getConnection);
     }
 
     static void applyTargetSchemas(MigrationContract contract, ConnectionFactory connectionFactory) {
-        log.info("Fase de Liquibase: Iniciando despliegue de esquemas DDL en Destino para tablas activas.");
+        applyTargetSchemas(contract, resolveChangelogsDir(), connectionFactory);
+    }
+
+    static void applyTargetSchemas(MigrationContract contract, Path changelogsDir, ConnectionFactory connectionFactory) {
+        log.info("Fase de Liquibase: desplegando esquemas DDL en destino para tablas activas.");
 
         if (contract == null || contract.getTables() == null || contract.getTables().isEmpty()) {
             throw new InvalidChangelogException("No hay tablas activas sobre las que aplicar Liquibase.");
         }
-
-        String changelogsDirEnv = System.getenv("CHANGELOGS_DIR");
-        if (changelogsDirEnv == null || changelogsDirEnv.trim().isEmpty()) {
-            changelogsDirEnv = "changelogs/tables";
+        if (changelogsDir == null) {
+            throw new InvalidChangelogException("El directorio de changelogs destino no puede ser nulo.");
         }
-        Path changelogsDir = Paths.get(changelogsDirEnv);
+
         Map<String, Path> changelogPathsByTable = resolveChangelogPaths(contract, changelogsDir);
 
         try (Connection targetConn = connectionFactory.getConnection(contract.getDatabase().getTargetConnection());
              DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(changelogsDir.toAbsolutePath())) {
-
-            DatabaseMetaData targetMeta = targetConn.getMetaData();
-            Database database = null;
-
-            for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
-                String tableId = entry.getKey();
-                TableMigration tableMigration = entry.getValue();
-                String targetSchema = tableMigration.getTarget().getSchema();
-                String targetTable = tableMigration.getTarget().getTable();
-                Path changelogPath = changelogPathsByTable.get(tableId);
-
-                if (tableExists(targetMeta, targetSchema, targetTable)) {
-                    log.warn("La tabla destino '{}.{}' ya existe. No se ejecuta su createTable de Liquibase; se validara su estructura despues.",
-                            targetSchema,
-                            targetTable);
-                    continue;
-                }
-
-                log.info("Ejecutando Liquibase -> Desplegando estructura para '{}.{}' usando {}",
-                        targetSchema,
-                        targetTable,
-                        changelogPath.getFileName());
-                try {
-                    if (database == null) {
-                        database = DatabaseFactory.getInstance()
-                                .findCorrectDatabaseImplementation(new JdbcConnection(targetConn));
-                    }
-                    Database databaseForUpdate = database;
-                    Map<String, Object> scopeAttrs = Map.of(
-                            Scope.Attr.resourceAccessor.name(), resourceAccessor);
-                    Scope.child(scopeAttrs, () -> {
-                        new CommandScope("update")
-                                .addArgumentValue(DbUrlConnectionArgumentsCommandStep.DATABASE_ARG, databaseForUpdate)
-                                .addArgumentValue(UpdateCommandStep.CHANGELOG_FILE_ARG,
-                                        changelogPath.getFileName().toString())
-                                .execute();
-                    });
-                } catch (Exception e) {
-                    throw new InvalidChangelogException("Error al ejecutar Liquibase para el changelog "
-                            + changelogPath.getFileName() + " en la base de datos destino.", e);
-                }
-            }
+            applyChangelogs(contract, changelogPathsByTable, targetConn, resourceAccessor);
         } catch (InvalidChangelogException e) {
             throw e;
         } catch (Exception e) {
             throw new RuntimeException("Fallo critico durante el despliegue de Liquibase en destino", e);
         }
-        log.info("Despliegue estructural de Liquibase completado. Las tablas destino activas han sido creadas o detectadas como existentes.");
+
+        log.info("Despliegue estructural de Liquibase completado.");
     }
 
     @FunctionalInterface
     interface ConnectionFactory {
         Connection getConnection(ConnectionConfig config) throws SQLException;
+    }
+
+    private static Path resolveChangelogsDir() {
+        String configuredDir = System.getenv("CHANGELOGS_DIR");
+        if (configuredDir == null || configuredDir.trim().isEmpty()) {
+            configuredDir = "changelogs/tables";
+        }
+        return Paths.get(configuredDir);
+    }
+
+    private static void applyChangelogs(MigrationContract contract,
+                                        Map<String, Path> changelogPathsByTable,
+                                        Connection targetConn,
+                                        DirectoryResourceAccessor resourceAccessor) throws Exception {
+        DatabaseMetaData targetMeta = targetConn.getMetaData();
+        Database database = null;
+
+        for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
+            String tableId = entry.getKey();
+            TableMigration tableMigration = entry.getValue();
+            String targetSchema = tableMigration.getTarget().getSchema();
+            String targetTable = tableMigration.getTarget().getTable();
+            Path changelogPath = changelogPathsByTable.get(tableId);
+
+            if (tableExists(targetMeta, targetSchema, targetTable)) {
+                log.warn("La tabla destino '{}.{}' ya existe. No se ejecuta su createTable de Liquibase.",
+                        targetSchema,
+                        targetTable);
+                continue;
+            }
+
+            log.info("Ejecutando Liquibase para '{}.{}' usando {}", targetSchema, targetTable, changelogPath.getFileName());
+            try {
+                if (database == null) {
+                    database = DatabaseFactory.getInstance()
+                            .findCorrectDatabaseImplementation(new JdbcConnection(targetConn));
+                }
+                Database databaseForUpdate = database;
+                Map<String, Object> scopeAttrs = Map.of(Scope.Attr.resourceAccessor.name(), resourceAccessor);
+                Scope.child(scopeAttrs, () -> new CommandScope("update")
+                        .addArgumentValue(DbUrlConnectionArgumentsCommandStep.DATABASE_ARG, databaseForUpdate)
+                        .addArgumentValue(UpdateCommandStep.CHANGELOG_FILE_ARG, changelogPath.getFileName().toString())
+                        .execute());
+            } catch (Exception e) {
+                throw new InvalidChangelogException("Error al ejecutar Liquibase para el changelog "
+                        + changelogPath.getFileName() + " en la base de datos destino.", e);
+            }
+        }
     }
 
     private static Map<String, Path> resolveChangelogPaths(MigrationContract contract, Path changelogsDir) {
@@ -122,13 +125,16 @@ public class LiquibaseSchemaExecutor {
             TableMigration tableMigration = entry.getValue();
 
             if (tableMigration == null || tableMigration.getTarget() == null) {
-                throw new InvalidChangelogException("La tabla activa '" + tableId + "' no tiene destino valido para aplicar Liquibase.");
+                throw new InvalidChangelogException("La tabla activa '" + tableId
+                        + "' no tiene destino valido para aplicar Liquibase.");
             }
 
             String targetSchema = tableMigration.getTarget().getSchema();
             String targetTable = tableMigration.getTarget().getTable();
-            if (targetSchema == null || targetSchema.trim().isEmpty() || targetTable == null || targetTable.trim().isEmpty()) {
-                throw new InvalidChangelogException("La tabla activa '" + tableId + "' debe definir target.schema y target.table para aplicar Liquibase.");
+            if (targetSchema == null || targetSchema.trim().isEmpty()
+                    || targetTable == null || targetTable.trim().isEmpty()) {
+                throw new InvalidChangelogException("La tabla activa '" + tableId
+                        + "' debe definir target.schema y target.table para aplicar Liquibase.");
             }
 
             Path changelogPath = getChangelogPath(changelogsDir, targetSchema, targetTable);
