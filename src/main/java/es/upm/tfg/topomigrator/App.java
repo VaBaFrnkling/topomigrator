@@ -29,8 +29,6 @@ import java.util.List;
 import java.util.Map;
 
 public class App {
-    private static final Logger logger = LoggerFactory.getLogger(App.class);
-
     private static DatabaseConfig requireDatabaseConfig(MigrationContract contract) {
         if (contract == null || contract.getDatabase() == null) {
             throw new IllegalStateException("El contrato no contiene configuracion database para validar conexiones JDBC.");
@@ -39,10 +37,10 @@ public class App {
     }
 
     public static void main(String[] args) {
-        OutputDirectoryInitializer.ensureOutputDirectories();
-        logger.info("Iniciando orquestador TopoMigrator...");
-
         OutputCleaner.cleanOutputs();
+        OutputDirectoryInitializer.ensureOutputDirectories();
+        Logger logger = LoggerFactory.getLogger(App.class);
+        logger.info("Iniciando orquestador TopoMigrator...");
 
         try {
             String configPathEnv = System.getenv("MIGRATION_CONFIG_PATH");

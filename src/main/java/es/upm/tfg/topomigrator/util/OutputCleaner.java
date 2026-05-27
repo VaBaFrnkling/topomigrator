@@ -1,6 +1,5 @@
 package es.upm.tfg.topomigrator.util;
 
-import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
@@ -15,8 +14,6 @@ import java.util.stream.Stream;
  * antes de comenzar una nueva migración.
  */
 public class OutputCleaner {
-    private static final Logger log = LoggerFactory.getLogger(OutputCleaner.class);
-
     /**
      * Directorios protegidos que nunca deben ser limpiados por esta utilidad.
      * Guardrail programático: cualquier intento de pasar uno de estos a cleanDirectory
@@ -34,8 +31,6 @@ public class OutputCleaner {
     }
 
     static void cleanOutputs(Path outputsRoot) {
-        log.info("Realizando purga inicial: Borrando archivos de migraciones pasadas...");
-
         // Limpiamos trazas, errores y flujos residuales.
         // Omitimos intencionadamente:
         // - outputs/logs, para no corromper los ficheros de Logback (Java)
@@ -49,8 +44,6 @@ public class OutputCleaner {
         cleanDirectory(normalizedRoot, normalizedRoot.resolve("traces"), lastExecutionIdFile);
         cleanDirectory(normalizedRoot, normalizedRoot.resolve("errors"), lastExecutionIdFile);
         cleanDirectory(normalizedRoot, normalizedRoot.resolve("flows"), lastExecutionIdFile);
-
-        log.info("Entorno /outputs purgado. Todo limpio y claro para iniciar.");
     }
 
     private static void cleanDirectory(Path outputsRoot, Path directory, Path lastExecutionIdFile) {
@@ -62,7 +55,8 @@ public class OutputCleaner {
         Path relativePath = outputsRoot.relativize(directory.toAbsolutePath().normalize());
         String topLevelDir = relativePath.getName(0).toString().toLowerCase(java.util.Locale.ROOT);
         if (PROTECTED_DIRECTORIES.contains(topLevelDir)) {
-            log.warn("Intento de limpiar directorio protegido '{}' bloqueado por guardrail. No se elimina nada.", directory);
+            LoggerFactory.getLogger(OutputCleaner.class)
+                    .warn("Intento de limpiar directorio protegido '{}' bloqueado por guardrail. No se elimina nada.", directory);
             return;
         }
 
@@ -70,17 +64,18 @@ public class OutputCleaner {
             walk.filter(Files::isRegularFile)
                 .forEach(file -> {
                     if (shouldPreserve(file, lastExecutionIdFile)) {
-                        log.debug("Preservando fichero de estado: {}", file);
                         return;
                     }
                     try {
                         Files.deleteIfExists(file);
                     } catch (IOException e) {
-                        log.warn("No se pudo eliminar el archivo (puede estar en uso): {}", file);
+                        LoggerFactory.getLogger(OutputCleaner.class)
+                                .warn("No se pudo eliminar el archivo (puede estar en uso): {}", file);
                     }
                 });
         } catch (IOException e) {
-            log.error("Error intentando rastrear el directorio {} para su limpieza.", directory, e);
+            LoggerFactory.getLogger(OutputCleaner.class)
+                    .error("Error intentando rastrear el directorio {} para su limpieza.", directory, e);
         }
     }
 
