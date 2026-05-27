@@ -7,6 +7,7 @@ import es.upm.tfg.topomigrator.support.QualityTestData;
 import org.junit.Test;
 
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -15,7 +16,12 @@ import static org.junit.Assert.assertTrue;
 
 public class FlowVariableBuilderQualityTest {
 
-    private final TableMetricsService metricsService = new TableMetricsService();
+    private final TableMetricsService metricsService = new TableMetricsService() {
+        @Override
+        public String buildSourceSelectSql(MigrationContract contract, TableMigration tableConfig, String effectiveStartValue) {
+            return buildSourceSelectSql(tableConfig, effectiveStartValue);
+        }
+    };
     private final FlowVariableBuilder builder = new FlowVariableBuilder(metricsService);
 
     @Test
@@ -50,6 +56,21 @@ public class FlowVariableBuilderQualityTest {
         assertEquals("SELECT * FROM public.orders WHERE updated_at > '2026-05-01T00:00:00' ORDER BY updated_at ASC LIMIT 100",
                 variables.get("##QUERY_SQL##"));
         assertTrue(trace.auditMetrics.warnings.get(0).contains("UPSERT"));
+    }
+
+    @Test
+    public void buildSourceSelectSqlOrdersFullSelfReferencingTableByHierarchy() {
+        TableMigration table = QualityTestData.fullTable("employees");
+
+        String sql = new TableMetricsService().buildSourceSelectSql(
+                table,
+                null,
+                new TableMetricsService.SelfReferenceOrdering(List.of("id", "name", "manager_id"), "id", "manager_id")
+        );
+
+        assertTrue(sql.startsWith("WITH RECURSIVE topo_source AS (SELECT * FROM public.employees)"));
+        assertTrue(sql.contains("JOIN topo_self_fk_order parent ON child.manager_id = parent.id"));
+        assertTrue(sql.endsWith("SELECT id, name, manager_id FROM topo_ranked ORDER BY topo_depth ASC, id ASC"));
     }
 
     private TableTrace tableTrace(TableMigration table) {

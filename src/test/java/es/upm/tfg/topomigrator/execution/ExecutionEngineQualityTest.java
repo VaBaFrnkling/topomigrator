@@ -196,5 +196,10 @@ public class ExecutionEngineQualityTest {
             List<Long> values = targetRows.getOrDefault(table, List.of(0L));
             return values.get(Math.min(callIndex, values.size() - 1));
         }
+
+        @Override
+        public String buildSourceSelectSql(MigrationContract contract, TableMigration tableConfig, String effectiveStartValue) {
+            return buildSourceSelectSql(tableConfig, effectiveStartValue);
+        }
     }
 }

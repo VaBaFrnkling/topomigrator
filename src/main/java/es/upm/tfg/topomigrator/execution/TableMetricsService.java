@@ -12,7 +12,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.DatabaseMetaData;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 /**
  * Servicio de métricas de auditoría basado en consultas SQL reales.
@@ -57,6 +60,15 @@ public class TableMetricsService {
     }
 
     public String buildSourceSelectSql(TableMigration tableConfig, String effectiveStartValue) {
+        return buildSourceSelectSql(tableConfig, effectiveStartValue, null);
+    }
+
+    public String buildSourceSelectSql(MigrationContract contract, TableMigration tableConfig, String effectiveStartValue) throws Exception {
+        SelfReferenceOrdering selfReferenceOrdering = detectSimpleSelfReferenceOrdering(contract, tableConfig);
+        return buildSourceSelectSql(tableConfig, effectiveStartValue, selfReferenceOrdering);
+    }
+
+    String buildSourceSelectSql(TableMigration tableConfig, String effectiveStartValue, SelfReferenceOrdering selfReferenceOrdering) {
         String migrationType = normalizedMigrationType(tableConfig);
 
         String qualifiedSource = qualifyName(
@@ -68,6 +80,10 @@ public class TableMetricsService {
         StringBuilder sql = new StringBuilder("SELECT * FROM ").append(qualifiedSource);
         if (!isBlank(whereClause)) {
             sql.append(" ").append(whereClause);
+        }
+
+        if ("full".equals(migrationType) && selfReferenceOrdering != null) {
+            return buildSelfReferenceOrderedSql(sql.toString(), selfReferenceOrdering);
         }
 
         if ("incremental".equals(migrationType)) {
@@ -114,6 +130,116 @@ public class TableMetricsService {
             }
             return readPrimaryKeyColumns(metaData, schema != null ? schema.toLowerCase() : null, table.toLowerCase());
         }
+    }
+
+    private SelfReferenceOrdering detectSimpleSelfReferenceOrdering(MigrationContract contract, TableMigration tableConfig) throws Exception {
+        if (!"full".equals(normalizedMigrationType(tableConfig))) {
+            return null;
+        }
+
+        ConnectionConfig sourceConnection = contract.getDatabase().getSourceConnection();
+        if (sourceConnection.getDriver() != null && !sourceConnection.getDriver().isBlank()) {
+            Class.forName(sourceConnection.getDriver());
+        }
+
+        String schema = tableConfig.getSource().getSchema();
+        String table = tableConfig.getSource().getTable();
+
+        try (Connection connection = DriverManager.getConnection(
+                sourceConnection.getJdbcUrl(),
+                sourceConnection.getUsername(),
+                sourceConnection.getPassword())) {
+
+            DatabaseMetaData metaData = connection.getMetaData();
+            List<String> columns = readColumnNames(metaData, schema, table);
+            if (columns.isEmpty()) {
+                columns = readColumnNames(metaData, schema != null ? schema.toUpperCase(Locale.ROOT) : null, table.toUpperCase(Locale.ROOT));
+            }
+            if (columns.isEmpty()) {
+                columns = readColumnNames(metaData, schema != null ? schema.toLowerCase(Locale.ROOT) : null, table.toLowerCase(Locale.ROOT));
+            }
+            if (columns.isEmpty()) {
+                return null;
+            }
+
+            List<SelfReferenceOrdering> orderings = readSelfReferenceOrderings(metaData, schema, table, columns);
+            if (orderings.isEmpty()) {
+                orderings = readSelfReferenceOrderings(metaData, schema != null ? schema.toUpperCase(Locale.ROOT) : null, table.toUpperCase(Locale.ROOT), columns);
+            }
+            if (orderings.isEmpty()) {
+                orderings = readSelfReferenceOrderings(metaData, schema != null ? schema.toLowerCase(Locale.ROOT) : null, table.toLowerCase(Locale.ROOT), columns);
+            }
+
+            return orderings.size() == 1 ? orderings.get(0) : null;
+        }
+    }
+
+    private List<String> readColumnNames(DatabaseMetaData metaData, String schema, String table) throws Exception {
+        List<String> columns = new ArrayList<>();
+        String schemaPattern = schema != null && !schema.trim().isEmpty() ? schema : null;
+        try (ResultSet rs = metaData.getColumns(null, schemaPattern, table, null)) {
+            while (rs.next()) {
+                String column = rs.getString("COLUMN_NAME");
+                if (!isBlank(column)) {
+                    columns.add(column);
+                }
+            }
+        }
+        return columns;
+    }
+
+    private List<SelfReferenceOrdering> readSelfReferenceOrderings(DatabaseMetaData metaData,
+                                                                  String schema,
+                                                                  String table,
+                                                                  List<String> columns) throws Exception {
+        Map<String, SelfReferenceOrdering> byConstraint = new LinkedHashMap<>();
+        String schemaPattern = schema != null && !schema.trim().isEmpty() ? schema : null;
+        try (ResultSet rs = metaData.getImportedKeys(null, schemaPattern, table)) {
+            while (rs.next()) {
+                String fkSchema = rs.getString("FKTABLE_SCHEM");
+                String fkTable = rs.getString("FKTABLE_NAME");
+                String pkSchema = rs.getString("PKTABLE_SCHEM");
+                String pkTable = rs.getString("PKTABLE_NAME");
+                if (!sameTable(schema, table, fkSchema, fkTable) || !sameTable(schema, table, pkSchema, pkTable)) {
+                    continue;
+                }
+
+                String fkName = rs.getString("FK_NAME");
+                String key = !isBlank(fkName) ? fkName : rs.getString("FKCOLUMN_NAME") + "->" + rs.getString("PKCOLUMN_NAME");
+                SelfReferenceOrdering ordering = new SelfReferenceOrdering(
+                        List.copyOf(columns),
+                        rs.getString("PKCOLUMN_NAME"),
+                        rs.getString("FKCOLUMN_NAME")
+                );
+
+                if (byConstraint.putIfAbsent(key, ordering) != null) {
+                    byConstraint.remove(key);
+                }
+            }
+        }
+        return new ArrayList<>(byConstraint.values());
+    }
+
+    private String buildSelfReferenceOrderedSql(String baseSelectSql, SelfReferenceOrdering ordering) {
+        String projection = String.join(", ", ordering.columns);
+        return "WITH RECURSIVE topo_source AS (" + baseSelectSql + "), "
+                + "topo_self_fk_order AS ("
+                + "SELECT root.*, 0 AS topo_depth, ARRAY[root." + ordering.primaryKeyColumn + "] AS topo_path "
+                + "FROM topo_source root "
+                + "WHERE root." + ordering.foreignKeyColumn + " IS NULL "
+                + "OR NOT EXISTS (SELECT 1 FROM topo_source parent WHERE parent." + ordering.primaryKeyColumn + " = root." + ordering.foreignKeyColumn + ") "
+                + "UNION ALL "
+                + "SELECT child.*, parent.topo_depth + 1 AS topo_depth, parent.topo_path || child." + ordering.primaryKeyColumn + " AS topo_path "
+                + "FROM topo_source child "
+                + "JOIN topo_self_fk_order parent ON child." + ordering.foreignKeyColumn + " = parent." + ordering.primaryKeyColumn + " "
+                + "WHERE NOT child." + ordering.primaryKeyColumn + " = ANY(parent.topo_path)"
+                + "), topo_ranked AS ("
+                + "SELECT * FROM topo_self_fk_order "
+                + "UNION ALL "
+                + "SELECT remaining.*, 2147483647 AS topo_depth, ARRAY[remaining." + ordering.primaryKeyColumn + "] AS topo_path "
+                + "FROM topo_source remaining "
+                + "WHERE NOT EXISTS (SELECT 1 FROM topo_self_fk_order seen WHERE seen." + ordering.primaryKeyColumn + " = remaining." + ordering.primaryKeyColumn + ")"
+                + ") SELECT " + projection + " FROM topo_ranked ORDER BY topo_depth ASC, " + ordering.primaryKeyColumn + " ASC";
     }
 
     private List<String> readPrimaryKeyColumns(DatabaseMetaData metaData, String schema, String table) throws Exception {
@@ -221,5 +347,26 @@ public class TableMetricsService {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private boolean sameTable(String expectedSchema, String expectedTable, String actualSchema, String actualTable) {
+        return normalize(expectedTable).equals(normalize(actualTable))
+                && (isBlank(expectedSchema) || normalize(expectedSchema).equals(normalize(actualSchema)));
+    }
+
+    private String normalize(String value) {
+        return value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+    }
+
+    static final class SelfReferenceOrdering {
+        private final List<String> columns;
+        private final String primaryKeyColumn;
+        private final String foreignKeyColumn;
+
+        SelfReferenceOrdering(List<String> columns, String primaryKeyColumn, String foreignKeyColumn) {
+            this.columns = columns;
+            this.primaryKeyColumn = primaryKeyColumn;
+            this.foreignKeyColumn = foreignKeyColumn;
+        }
     }
 }

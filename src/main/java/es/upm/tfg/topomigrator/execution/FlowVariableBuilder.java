@@ -53,7 +53,11 @@ class FlowVariableBuilder {
         flowConfigVariables.put("##TARGET_DB_TYPE##", defaultValue(target.getDatabaseType(), inferDatabaseType(target)));
 
         configureWriteMode(contract, tableConfig, tableTrace, flowConfigVariables);
-        flowConfigVariables.put("##QUERY_SQL##", metricsService.buildSourceSelectSql(tableConfig, effectiveIncrementalStartValue));
+        try {
+            flowConfigVariables.put("##QUERY_SQL##", metricsService.buildSourceSelectSql(contract, tableConfig, effectiveIncrementalStartValue));
+        } catch (Exception e) {
+            throw new IllegalStateException("No se pudo construir la consulta SQL de origen para " + qualifiedTargetName(tableConfig) + ".", e);
+        }
 
         return flowConfigVariables;
     }
