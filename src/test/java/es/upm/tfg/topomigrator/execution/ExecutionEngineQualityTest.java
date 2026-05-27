@@ -35,10 +35,10 @@ public class ExecutionEngineQualityTest {
         RecordingNiFiClient nifi = new RecordingNiFiClient();
         RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
         CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 20L)));
-        ExecutionEngine engine = engine(nifi, traces, metrics);
+        EngineHarness harness = engine(nifi, traces, metrics);
         MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
 
-        engine.executeMigration(List.of(new TableNode("customers")), contract, List.of());
+        harness.engine.executeMigration(List.of(new TableNode("customers")), contract, List.of());
 
         assertEquals(1, traces.summary.tables.total);
         assertEquals(1, traces.summary.tables.successful);
@@ -58,13 +58,13 @@ public class ExecutionEngineQualityTest {
                 Map.of("customers", 5L, "orders", 7L),
                 Map.of("customers", List.of(0L), "orders", List.of(0L))
         );
-        ExecutionEngine engine = engine(nifi, traces, metrics);
+        EngineHarness harness = engine(nifi, traces, metrics);
         MigrationContract contract = QualityTestData.contractWith(
                 QualityTestData.fullTable("customers"),
                 QualityTestData.fullTable("orders")
         );
 
-        IllegalStateException error = assertThrows(IllegalStateException.class, () -> engine.executeMigration(
+        IllegalStateException error = assertThrows(IllegalStateException.class, () -> harness.engine.executeMigration(
                 List.of(new TableNode("customers"), new TableNode("orders")),
                 contract,
                 List.of(new ForeignKeyDependency("customers", "orders"))
@@ -77,8 +77,8 @@ public class ExecutionEngineQualityTest {
         assertEquals("FAILED", traces.tableTraces.get(0).status);
         assertEquals("BLOCKED", traces.tableTraces.get(1).status);
         assertEquals(List.of("Migracion_customers"), nifi.uploadedGroups);
-        assertEquals(List.of("NIFI_TABLE_EXECUTION:public.customers:RuntimeException"), errorWriter(engine).tableErrors);
-        assertEquals(List.of(), errorWriter(engine).executionErrors);
+        assertEquals(List.of("NIFI_TABLE_EXECUTION:public.customers:RuntimeException"), harness.errors.tableErrors);
+        assertEquals(List.of(), harness.errors.executionErrors);
     }
 
     @Test
@@ -86,10 +86,10 @@ public class ExecutionEngineQualityTest {
         RecordingNiFiClient nifi = new RecordingNiFiClient();
         RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
         CountingMetricsService metrics = new CountingMetricsService(Map.of("employees", 3L), Map.of("employees", List.of(0L, 3L)));
-        ExecutionEngine engine = engine(nifi, traces, metrics);
+        EngineHarness harness = engine(nifi, traces, metrics);
         MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("employees"));
 
-        engine.executeMigration(
+        harness.engine.executeMigration(
                 List.of(new TableNode("employees")),
                 contract,
                 List.of(new ForeignKeyDependency("employees", "employees"))
@@ -107,11 +107,11 @@ public class ExecutionEngineQualityTest {
         nifi.failCleanup = true;
         RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
         CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 20L)));
-        ExecutionEngine engine = engine(nifi, traces, metrics);
+        EngineHarness harness = engine(nifi, traces, metrics);
         MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> engine.executeMigration(List.of(new TableNode("customers")), contract, List.of()));
+                () -> harness.engine.executeMigration(List.of(new TableNode("customers")), contract, List.of()));
 
         assertTrue(error.getMessage().contains("tabla(s) fallida(s)"));
         assertEquals("FAILED", traces.tableTraces.get(0).status);
@@ -124,27 +124,26 @@ public class ExecutionEngineQualityTest {
         nifi.failStaleCleanup = true;
         RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
         CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 20L)));
-        ExecutionEngine engine = engine(nifi, traces, metrics);
+        EngineHarness harness = engine(nifi, traces, metrics);
         MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> engine.executeMigration(List.of(new TableNode("customers")), contract, List.of()));
+                () -> harness.engine.executeMigration(List.of(new TableNode("customers")), contract, List.of()));
 
         assertTrue(error.getMessage().contains("Fallo crítico general"));
         assertEquals(List.of(), nifi.uploadedGroups);
-        assertEquals(List.of("NIFI_EXECUTION:RuntimeException"), errorWriter(engine).executionErrors);
+        assertEquals(List.of("NIFI_EXECUTION:RuntimeException"), harness.errors.executionErrors);
     }
 
-    private ExecutionEngine engine(RecordingNiFiClient nifi, RecordingTraceabilityManager traces, CountingMetricsService metrics) throws Exception {
+    private EngineHarness engine(RecordingNiFiClient nifi, RecordingTraceabilityManager traces, CountingMetricsService metrics) throws Exception {
         Path stateFile = temporaryFolder.newFolder("state").toPath().resolve("incremental-state.json");
-        return new ExecutionEngine(nifi, traces, metrics, new IncrementalStateService(stateFile),
-                new RecordingErrorArtifactWriter(), 0L, 0L, 5);
+        RecordingErrorArtifactWriter errors = new RecordingErrorArtifactWriter();
+        ExecutionEngine engine = new ExecutionEngine(nifi, traces, metrics, new IncrementalStateService(stateFile),
+                errors, 0L, 0L, 5);
+        return new EngineHarness(engine, errors);
     }
 
-    private RecordingErrorArtifactWriter errorWriter(ExecutionEngine engine) throws Exception {
-        java.lang.reflect.Field field = ExecutionEngine.class.getDeclaredField("errorArtifactWriter");
-        field.setAccessible(true);
-        return (RecordingErrorArtifactWriter) field.get(engine);
+    private record EngineHarness(ExecutionEngine engine, RecordingErrorArtifactWriter errors) {
     }
 
     private static final class RecordingErrorArtifactWriter extends ErrorArtifactWriter {

@@ -86,11 +86,14 @@ public class App {
             runPhase("SCHEMA_COMPATIBILITY_VALIDATION", errorArtifactWriter, errorContext,
                     () -> SchemaCompatibilityValidator.validateTargetAndMapping(contract));
 
-            Map<String, String> physicalToContractKey = new LinkedHashMap<>();
-            for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
-                String physicalId = TableIdentityUtils.toSourcePhysicalId(entry.getValue());
-                physicalToContractKey.put(physicalId, entry.getKey());
-            }
+            Map<String, String> physicalToContractKey = runPhase("DEPENDENCY_INDEXING", errorArtifactWriter, errorContext, () -> {
+                Map<String, String> index = new LinkedHashMap<>();
+                for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
+                    String physicalId = TableIdentityUtils.toSourcePhysicalId(entry.getValue());
+                    index.put(physicalId, entry.getKey());
+                }
+                return index;
+            });
 
             List<ForeignKeyDependency> rawDependencies = runPhase("DEPENDENCY_EXTRACTION", errorArtifactWriter, errorContext, () -> {
                 try (Connection sourceConnection = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection())) {
@@ -99,20 +102,24 @@ public class App {
                 }
             });
 
-            List<ForeignKeyDependency> dependencies = new ArrayList<>();
-            for (ForeignKeyDependency dep : rawDependencies) {
-                String logicalParent = physicalToContractKey.get(dep.getParentTable());
-                String logicalDependent = physicalToContractKey.get(dep.getDependentTable());
-                if (logicalParent != null && logicalDependent != null) {
-                    dependencies.add(new ForeignKeyDependency(logicalParent, logicalDependent));
+            List<ForeignKeyDependency> dependencies = runPhase("DEPENDENCY_MAPPING", errorArtifactWriter, errorContext, () -> {
+                List<ForeignKeyDependency> mappedDependencies = new ArrayList<>();
+                for (ForeignKeyDependency dep : rawDependencies) {
+                    String logicalParent = physicalToContractKey.get(dep.getParentTable());
+                    String logicalDependent = physicalToContractKey.get(dep.getDependentTable());
+                    if (logicalParent != null && logicalDependent != null) {
+                        mappedDependencies.add(new ForeignKeyDependency(logicalParent, logicalDependent));
+                    }
                 }
-            }
+                return mappedDependencies;
+            });
 
             DependencyResolver resolver = new DependencyResolver();
             List<TableNode> executionOrder = runPhase("DEPENDENCY_RESOLUTION", errorArtifactWriter, errorContext,
                     () -> resolver.resolveExecutionOrder(contract.getTables().keySet(), dependencies));
 
-            ExecutionEngine engine = new ExecutionEngine(errorArtifactWriter);
+            ExecutionEngine engine = runPhase("NIFI_CLIENT_INITIALIZATION", errorArtifactWriter, errorContext,
+                    () -> new ExecutionEngine(errorArtifactWriter));
             engine.executeMigration(executionOrder, contract, dependencies);
 
             logger.info("Migracion orquestada y desplegada correctamente.");
