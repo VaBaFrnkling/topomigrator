@@ -40,6 +40,8 @@ services:
       TARGET_DB_PASSWORD: ${TARGET_DB_PASSWORD:?TARGET_DB_PASSWORD no configurado}
     restart: on-failure:3
     init: true
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - topomigrator-net
 
@@ -68,6 +70,8 @@ services:
       start_period: 90s
     restart: unless-stopped
     stop_grace_period: 1m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - topomigrator-net
 
