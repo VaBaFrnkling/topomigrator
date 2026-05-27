@@ -14,7 +14,7 @@ The normal way to run the project is the root script:
 
 Before running it, prepare these three things:
 
-1. Create `.env` in the project root.
+1. Create `.env` in the project root, or export the same variables before running the script.
 2. Put the migration YAML files in `configs/`.
 3. Put one Liquibase changelog per target table in `changelogs/tables/`.
 
@@ -38,14 +38,14 @@ topomigrator/
   outputs/
 ```
 
-The script loads `.env` when it exists, validates the project structure, checks the YAML files, prepares local PostgreSQL databases when needed, ensures `.env` has the container paths expected by Docker Compose, runs the migration with Docker Compose, and then checks the generated results.
+The script loads `.env` when it exists, validates the project structure, checks that the required configuration and changelog files are present, prepares local PostgreSQL databases when needed, ensures `.env` has the container paths expected by Docker Compose, runs the migration with Docker Compose, and then checks the generated results. The Java application validates the YAML contents during startup.
 
 Requirements:
 
 - Bash: Linux, WSL, or Git Bash.
 - Docker with `docker compose`.
 - PostgreSQL reachable from the host and from the Docker containers.
-- `psql` available on the host if you want the helper checks and PostgreSQL setup to run.
+- `psql` available on the host for the current wrapper checks and PostgreSQL setup helper.
 - Java 17 and Maven 3.x if you want to build or test locally outside Docker.
 
 On Windows, use WSL or Git Bash. The script is not a native PowerShell or `cmd` script.
@@ -105,6 +105,14 @@ INCREMENTAL_STATE_PATH=/app/outputs/state/incremental-state.json
 ```
 
 Use `/app/...` paths for files read by the application inside the container. Those are correct because Docker Compose mounts the host folders into `/app`.
+
+Optional path override:
+
+```env
+CHANGELOGS_DIR=/app/changelogs/tables
+```
+
+If omitted, the Java code uses `changelogs/tables` relative to its working directory.
 
 For PostgreSQL host names:
 
@@ -312,8 +320,8 @@ Internal execution flow:
 1. Creates output directories.
 2. Cleans previous temporary traces, errors, and flow outputs.
 3. Loads `contract.yaml`.
-4. Loads `datasources.yaml`.
-5. Resolves environment placeholders.
+4. Loads `datasources.yaml` through `ContractLoader`.
+5. Resolves datasource environment placeholders.
 6. Validates the contract.
 7. Keeps only `enabled: true` tables.
 8. Tests source and target JDBC connections.
@@ -451,7 +459,7 @@ mvn package
 java -jar target/topomigrator-1.0-SNAPSHOT.jar
 ```
 
-When running locally outside Docker, make sure `MIGRATION_CONFIG_PATH`, `DATASOURCES_CONFIG_PATH`, `INCREMENTAL_STATE_PATH`, and all datasource variables point to host paths and reachable JDBC URLs.
+When running locally outside Docker, make sure `MIGRATION_CONFIG_PATH`, `DATASOURCES_CONFIG_PATH`, `INCREMENTAL_STATE_PATH`, `CHANGELOGS_DIR`, and all datasource variables point to host paths and reachable JDBC URLs.
 
 ## Tests
 
