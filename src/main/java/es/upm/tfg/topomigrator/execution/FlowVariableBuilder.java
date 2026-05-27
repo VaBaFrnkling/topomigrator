@@ -72,31 +72,17 @@ class FlowVariableBuilder {
         String statementType = "INSERT";
         String updateKeys = "";
 
-        if ("incremental".equals(migrationType)) {
+        if ("full".equals(migrationType)) {
+            List<String> updateKeyColumns = resolveTargetIdempotencyKeys(contract, tableConfig, "full");
+            statementType = "UPSERT";
+            updateKeys = String.join(",", updateKeyColumns);
+            addWarning(tableTrace, "Migracion full configurada en modo UPSERT con claves de idempotencia inferidas: " + updateKeys);
+        } else if ("incremental".equals(migrationType)) {
             IncrementalConfig incrementalConfig = tableConfig.getIncrementalConfig();
             String loadStrategy = normalizeLoadStrategy(incrementalConfig != null ? incrementalConfig.getLoadStrategy() : null);
 
             if ("upsert".equals(loadStrategy)) {
-                List<String> updateKeyColumns = cleanColumnList(
-                        incrementalConfig != null ? incrementalConfig.getIdempotencyKeyColumns() : null
-                );
-
-                if (updateKeyColumns.isEmpty()) {
-                    try {
-                        updateKeyColumns = cleanColumnList(metricsService.getTargetPrimaryKeyColumns(contract, tableConfig));
-                    } catch (Exception e) {
-                        throw new IllegalStateException("No se pudieron detectar claves primarias para la migracion incremental de "
-                                + qualifiedTargetName(tableConfig)
-                                + ". Configure incrementalConfig.idempotencyKeyColumns o revise los metadatos de la tabla destino.", e);
-                    }
-                }
-
-                if (updateKeyColumns.isEmpty()) {
-                    throw new IllegalStateException("La tabla incremental " + qualifiedTargetName(tableConfig)
-                            + " usa loadStrategy=upsert, pero no tiene idempotencyKeyColumns ni clave primaria detectable. "
-                            + "No se puede garantizar idempotencia ante reejecuciones.");
-                }
-
+                List<String> updateKeyColumns = resolveIncrementalIdempotencyKeys(contract, tableConfig, incrementalConfig);
                 statementType = "UPSERT";
                 updateKeys = String.join(",", updateKeyColumns);
                 addWarning(tableTrace, "Migracion incremental configurada en modo UPSERT con claves de idempotencia: " + updateKeys);
@@ -113,6 +99,38 @@ class FlowVariableBuilder {
 
         flowConfigVariables.put("##STATEMENT_TYPE##", statementType);
         flowConfigVariables.put("##UPDATE_KEYS##", updateKeys);
+    }
+
+    private List<String> resolveIncrementalIdempotencyKeys(MigrationContract contract,
+                                                           TableMigration tableConfig,
+                                                           IncrementalConfig incrementalConfig) {
+        List<String> configuredKeys = cleanColumnList(
+                incrementalConfig != null ? incrementalConfig.getIdempotencyKeyColumns() : null
+        );
+        if (!configuredKeys.isEmpty()) {
+            return configuredKeys;
+        }
+
+        return resolveTargetIdempotencyKeys(contract, tableConfig, "incremental");
+    }
+
+    private List<String> resolveTargetIdempotencyKeys(MigrationContract contract, TableMigration tableConfig, String migrationType) {
+        List<String> updateKeyColumns;
+        try {
+            updateKeyColumns = cleanColumnList(metricsService.getTargetPrimaryKeyColumns(contract, tableConfig));
+        } catch (Exception e) {
+            throw new IllegalStateException("No se pudieron detectar claves primarias para la migracion "
+                    + migrationType + " de " + qualifiedTargetName(tableConfig)
+                    + ". Configure claves de idempotencia o revise los metadatos de la tabla destino.", e);
+        }
+
+        if (updateKeyColumns.isEmpty()) {
+            throw new IllegalStateException("La tabla " + qualifiedTargetName(tableConfig)
+                    + " usa migracion " + migrationType + " en modo UPSERT, pero no tiene clave primaria detectable. "
+                    + "No se puede garantizar idempotencia ante reejecuciones.");
+        }
+
+        return updateKeyColumns;
     }
 
     private void addWarning(TableTrace tableTrace, String warning) {

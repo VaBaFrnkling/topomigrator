@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 public class FlowVariableBuilderQualityTest {
@@ -20,6 +21,11 @@ public class FlowVariableBuilderQualityTest {
         @Override
         public String buildSourceSelectSql(MigrationContract contract, TableMigration tableConfig, String effectiveStartValue) {
             return buildSourceSelectSql(tableConfig, effectiveStartValue);
+        }
+
+        @Override
+        public List<String> getTargetPrimaryKeyColumns(MigrationContract contract, TableMigration tableConfig) {
+            return List.of("id");
         }
     };
     private final FlowVariableBuilder builder = new FlowVariableBuilder(metricsService);
@@ -36,11 +42,12 @@ public class FlowVariableBuilderQualityTest {
         assertEquals("exec-001", variables.get("##EXECUTION_ID##"));
         assertEquals("customers", variables.get("##TABLA_ORIGEN##"));
         assertEquals("public", variables.get("##ESQUEMA_DESTINO##"));
-        assertEquals("INSERT", variables.get("##STATEMENT_TYPE##"));
-        assertEquals("", variables.get("##UPDATE_KEYS##"));
+        assertEquals("UPSERT", variables.get("##STATEMENT_TYPE##"));
+        assertEquals("id", variables.get("##UPDATE_KEYS##"));
         assertEquals("SELECT * FROM public.customers", variables.get("##QUERY_SQL##"));
         assertEquals("jdbc:postgresql://source:5432/source_db", variables.get("##SOURCE_DB_URL##"));
         assertEquals("PostgreSQL", variables.get("##TARGET_DB_TYPE##"));
+        assertTrue(trace.auditMetrics.warnings.get(0).contains("Migracion full"));
     }
 
     @Test
@@ -71,6 +78,30 @@ public class FlowVariableBuilderQualityTest {
         assertTrue(sql.startsWith("WITH RECURSIVE topo_source AS (SELECT * FROM public.employees)"));
         assertTrue(sql.contains("JOIN topo_self_fk_order parent ON child.manager_id = parent.id"));
         assertTrue(sql.endsWith("SELECT id, name, manager_id FROM topo_ranked ORDER BY topo_depth ASC, id ASC"));
+    }
+
+    @Test
+    public void buildFailsForFullMigrationWhenPrimaryKeyCannotBeDetected() {
+        TableMetricsService noPrimaryKeyMetrics = new TableMetricsService() {
+            @Override
+            public String buildSourceSelectSql(MigrationContract contract, TableMigration tableConfig, String effectiveStartValue) {
+                return buildSourceSelectSql(tableConfig, effectiveStartValue);
+            }
+
+            @Override
+            public List<String> getTargetPrimaryKeyColumns(MigrationContract contract, TableMigration tableConfig) {
+                return List.of();
+            }
+        };
+        FlowVariableBuilder localBuilder = new FlowVariableBuilder(noPrimaryKeyMetrics);
+        TableMigration table = QualityTestData.fullTable("customers");
+        MigrationContract contract = QualityTestData.contractWith(table);
+
+        IllegalStateException error = assertThrows(IllegalStateException.class,
+                () -> localBuilder.build("exec-003", contract, table, tableTrace(table), null));
+
+        assertTrue(error.getMessage().contains("UPSERT"));
+        assertTrue(error.getMessage().contains("clave primaria"));
     }
 
     private TableTrace tableTrace(TableMigration table) {

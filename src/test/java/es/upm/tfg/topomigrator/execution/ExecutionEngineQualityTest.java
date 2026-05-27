@@ -201,5 +201,10 @@ public class ExecutionEngineQualityTest {
         public String buildSourceSelectSql(MigrationContract contract, TableMigration tableConfig, String effectiveStartValue) {
             return buildSourceSelectSql(tableConfig, effectiveStartValue);
         }
+
+        @Override
+        public List<String> getTargetPrimaryKeyColumns(MigrationContract contract, TableMigration tableConfig) {
+            return List.of("id");
+        }
     }
 }
