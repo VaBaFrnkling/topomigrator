@@ -59,6 +59,11 @@ public class DependencyResolver {
                 String parentName = normalizeTableId(dep.getParentTable());
                 String dependentName = normalizeTableId(dep.getDependentTable());
 
+                if (parentName.equals(dependentName)) {
+                    logger.debug("Ignorada dependencia autorreferenciada para '{}'. No crea arista en el DAG.", parentName);
+                    continue;
+                }
+
                 if (normalizedIncluded.contains(parentName) && normalizedIncluded.contains(dependentName)) {
                     TableNode parent = new TableNode(parentName);
                     TableNode dependent = new TableNode(dependentName);

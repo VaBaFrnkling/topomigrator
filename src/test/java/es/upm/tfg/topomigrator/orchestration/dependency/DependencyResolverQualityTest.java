@@ -57,6 +57,20 @@ public class DependencyResolverQualityTest {
     }
 
     @Test
+    public void resolveExecutionOrderIgnoresSelfReferencingForeignKeys() {
+        DependencyResolver resolver = new DependencyResolver();
+        Set<String> tables = new LinkedHashSet<>(List.of("employees"));
+        List<ForeignKeyDependency> dependencies = List.of(new ForeignKeyDependency("employees", "employees"));
+
+        List<String> order = resolver.resolveExecutionOrder(tables, dependencies)
+                .stream()
+                .map(TableNode::getName)
+                .collect(Collectors.toList());
+
+        assertEquals(List.of("employees"), order);
+    }
+
+    @Test
     public void resolveExecutionOrderFailsForBlankTableIdentifiers() {
         DependencyResolver resolver = new DependencyResolver();
         Set<String> tables = new LinkedHashSet<>(List.of("customers", " "));

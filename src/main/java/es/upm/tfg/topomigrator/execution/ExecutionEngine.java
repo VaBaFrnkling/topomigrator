@@ -422,8 +422,14 @@ public class ExecutionEngine {
             return parentsByTable;
         }
         for (ForeignKeyDependency dependency : dependencies) {
-            parentsByTable.computeIfAbsent(canonicalTableKey(dependency.getDependentTable(), tableIdentityIndex), ignored -> new ArrayList<>())
-                    .add(canonicalTableKey(dependency.getParentTable(), tableIdentityIndex));
+            String parent = canonicalTableKey(dependency.getParentTable(), tableIdentityIndex);
+            String dependent = canonicalTableKey(dependency.getDependentTable(), tableIdentityIndex);
+            if (parent.equals(dependent)) {
+                logger.debug("Ignorada dependencia autorreferenciada para '{}'. No bloquea la ejecucion de la propia tabla.", dependent);
+                continue;
+            }
+            parentsByTable.computeIfAbsent(dependent, ignored -> new ArrayList<>())
+                    .add(parent);
         }
         return parentsByTable;
     }

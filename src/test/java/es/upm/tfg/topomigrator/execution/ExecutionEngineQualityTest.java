@@ -77,6 +77,26 @@ public class ExecutionEngineQualityTest {
         assertEquals(List.of("Migracion_customers"), nifi.uploadedGroups);
     }
 
+    @Test
+    public void executeMigrationDoesNotBlockTableForSelfReferencingForeignKey() throws Exception {
+        RecordingNiFiClient nifi = new RecordingNiFiClient();
+        RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
+        CountingMetricsService metrics = new CountingMetricsService(Map.of("employees", 3L), Map.of("employees", List.of(0L, 3L)));
+        ExecutionEngine engine = engine(nifi, traces, metrics);
+        MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("employees"));
+
+        engine.executeMigration(
+                List.of(new TableNode("employees")),
+                contract,
+                List.of(new ForeignKeyDependency("employees", "employees"))
+        );
+
+        assertEquals(1, traces.summary.tables.successful);
+        assertEquals(0, traces.summary.tables.blocked);
+        assertEquals("SUCCESS", traces.tableTraces.get(0).status);
+        assertEquals(List.of("Migracion_employees"), nifi.uploadedGroups);
+    }
+
     private ExecutionEngine engine(RecordingNiFiClient nifi, RecordingTraceabilityManager traces, CountingMetricsService metrics) throws Exception {
         Path stateFile = temporaryFolder.newFolder("state").toPath().resolve("incremental-state.json");
         return new ExecutionEngine(nifi, traces, metrics, new IncrementalStateService(stateFile), 0L, 0L, 5);

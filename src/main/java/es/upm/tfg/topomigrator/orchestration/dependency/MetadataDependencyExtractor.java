@@ -62,7 +62,9 @@ public class MetadataDependencyExtractor {
                             rs.getString("FKTABLE_NAME")
                     );
 
-                    if (normalizedIncluded.contains(parentId) && normalizedIncluded.contains(dependentId)) {
+                    if (parentId.equals(dependentId)) {
+                        logger.debug("Ignorada FK autorreferenciada dentro de {}. No afecta al orden entre tablas.", parentId);
+                    } else if (normalizedIncluded.contains(parentId) && normalizedIncluded.contains(dependentId)) {
                         uniqueDependencies.add(new ForeignKeyDependency(parentId, dependentId));
                         logger.trace("Descubierta FK incluida en el lote: Padre {} <- Hija {}", parentId, dependentId);
                     } else {
