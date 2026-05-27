@@ -13,6 +13,7 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Types;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -333,7 +334,6 @@ public class SchemaCompatibilityValidator {
                 column.typeName = rs.getString("TYPE_NAME");
                 column.jdbcType = rs.getInt("DATA_TYPE");
                 column.columnSize = rs.getObject("COLUMN_SIZE") != null ? rs.getInt("COLUMN_SIZE") : null;
-                column.decimalDigits = rs.getObject("DECIMAL_DIGITS") != null ? rs.getInt("DECIMAL_DIGITS") : null;
                 column.nullable = rs.getInt("NULLABLE") == DatabaseMetaData.columnNullable;
                 columns.put(column.name.toLowerCase(Locale.ROOT), column);
             }
@@ -343,27 +343,24 @@ public class SchemaCompatibilityValidator {
 
     private static Set<String> getPrimaryKeyColumns(DatabaseMetaData metaData, String schema, String table) throws SQLException {
         Set<String> pkColumns = new HashSet<>();
-        readKeyColumns(metaData, schema, table, pkColumns, true);
+        readPrimaryKeyColumns(metaData, schema, table, pkColumns);
         if (pkColumns.isEmpty()) {
-            readKeyColumns(metaData, schema != null ? schema.toUpperCase(Locale.ROOT) : null, table.toUpperCase(Locale.ROOT), pkColumns, true);
+            readPrimaryKeyColumns(metaData, schema != null ? schema.toUpperCase(Locale.ROOT) : null, table.toUpperCase(Locale.ROOT), pkColumns);
         }
         if (pkColumns.isEmpty()) {
-            readKeyColumns(metaData, schema != null ? schema.toLowerCase(Locale.ROOT) : null, table.toLowerCase(Locale.ROOT), pkColumns, true);
+            readPrimaryKeyColumns(metaData, schema != null ? schema.toLowerCase(Locale.ROOT) : null, table.toLowerCase(Locale.ROOT), pkColumns);
         }
         return pkColumns;
     }
 
-    private static void readKeyColumns(DatabaseMetaData metaData,
-                                       String schema,
-                                       String table,
-                                       Set<String> columns,
-                                       boolean primaryKeys) throws SQLException {
+    private static void readPrimaryKeyColumns(DatabaseMetaData metaData,
+                                              String schema,
+                                              String table,
+                                              Set<String> columns) throws SQLException {
         String schemaPattern = schema != null && !schema.trim().isEmpty() ? schema : null;
-        try (ResultSet rs = primaryKeys
-                ? metaData.getPrimaryKeys(null, schemaPattern, table)
-                : metaData.getImportedKeys(null, schemaPattern, table)) {
+        try (ResultSet rs = metaData.getPrimaryKeys(null, schemaPattern, table)) {
             while (rs.next()) {
-                String column = primaryKeys ? rs.getString("COLUMN_NAME") : rs.getString("FKCOLUMN_NAME");
+                String column = rs.getString("COLUMN_NAME");
                 if (column != null) {
                     columns.add(column.toLowerCase(Locale.ROOT));
                 }
@@ -386,7 +383,7 @@ public class SchemaCompatibilityValidator {
     }
 
     private static List<ForeignKeyMetadata> readImportedKeys(DatabaseMetaData metaData, String schema, String table) throws SQLException {
-        List<ForeignKeyMetadata> foreignKeys = new java.util.ArrayList<>();
+        List<ForeignKeyMetadata> foreignKeys = new ArrayList<>();
         String schemaPattern = schema != null && !schema.trim().isEmpty() ? schema : null;
         try (ResultSet rs = metaData.getImportedKeys(null, schemaPattern, table)) {
             while (rs.next()) {
@@ -517,7 +514,6 @@ public class SchemaCompatibilityValidator {
         private String typeName;
         private int jdbcType;
         private Integer columnSize;
-        private Integer decimalDigits;
         private boolean nullable;
     }
 

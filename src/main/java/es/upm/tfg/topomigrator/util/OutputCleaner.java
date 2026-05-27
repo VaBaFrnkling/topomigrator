@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Locale;
 import java.util.Set;
 import java.util.stream.Stream;
 
@@ -53,7 +54,7 @@ public class OutputCleaner {
 
         // Guardrail programático: impide limpiar directorios protegidos.
         Path relativePath = outputsRoot.relativize(directory.toAbsolutePath().normalize());
-        String topLevelDir = relativePath.getName(0).toString().toLowerCase(java.util.Locale.ROOT);
+        String topLevelDir = relativePath.getName(0).toString().toLowerCase(Locale.ROOT);
         if (PROTECTED_DIRECTORIES.contains(topLevelDir)) {
             LoggerFactory.getLogger(OutputCleaner.class)
                     .warn("Intento de limpiar directorio protegido '{}' bloqueado por guardrail. No se elimina nada.", directory);

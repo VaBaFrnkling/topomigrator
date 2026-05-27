@@ -15,6 +15,7 @@ import org.junit.rules.TemporaryFolder;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -222,7 +223,7 @@ public class ExecutionEngineQualityTest {
     private static final class CountingMetricsService extends TableMetricsService {
         private final Map<String, Long> sourceRows;
         private final Map<String, List<Long>> targetRows;
-        private final Map<String, Integer> targetCalls = new java.util.HashMap<>();
+        private final Map<String, Integer> targetCalls = new HashMap<>();
 
         private CountingMetricsService(Map<String, Long> sourceRows, Map<String, List<Long>> targetRows) {
             this.sourceRows = sourceRows;

@@ -213,6 +213,8 @@ append_only
 
 For `upsert`, TopoMigrator needs idempotency keys. It uses `idempotencyKeyColumns` when configured; otherwise it attempts to infer the target primary key. If it cannot determine keys, the table fails instead of risking silent duplicates.
 
+Full migrations are also emitted as UPSERT using the target primary key, so an accidental replay of the same batch remains idempotent. If the target primary key cannot be inferred, the table fails before NiFi is executed.
+
 ### Optional Filters
 
 Tables may define a SQL `where` filter:
@@ -386,6 +388,8 @@ Docker Compose maps that from:
 ```text
 src/main/resources/db/drivers/
 ```
+
+Before each run, TopoMigrator removes stale `Migracion_*` Process Groups. After each table, Process Group cleanup is strict: if queues cannot be emptied or the group cannot be removed, the table fails instead of leaving reusable NiFi state. `PutDatabaseRecord` routes failures to the error path without rollback/retry loops.
 
 ## Outputs
 

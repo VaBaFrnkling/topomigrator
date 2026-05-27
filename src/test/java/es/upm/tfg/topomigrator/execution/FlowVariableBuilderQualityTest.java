@@ -6,6 +6,7 @@ import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.support.QualityTestData;
 import org.junit.Test;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -114,12 +115,12 @@ public class FlowVariableBuilderQualityTest {
         trace.table.target.schema = table.getTarget().getSchema();
         trace.table.target.name = table.getTarget().getTable();
         trace.auditMetrics = new TableTrace.AuditMetrics();
-        trace.auditMetrics.warnings = new java.util.ArrayList<>();
+        trace.auditMetrics.warnings = new ArrayList<>();
         return trace;
     }
 
     private Set<String> expectedNiFiTokens() {
-        return new LinkedHashSet<>(java.util.List.of(
+        return new LinkedHashSet<>(List.of(
                 "##EXECUTION_ID##",
                 "##TABLA_ORIGEN##",
                 "##ESQUEMA_ORIGEN##",

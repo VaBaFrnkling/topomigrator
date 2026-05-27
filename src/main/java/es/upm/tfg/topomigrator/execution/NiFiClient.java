@@ -17,6 +17,7 @@ import java.nio.file.Path;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -177,7 +178,7 @@ public class NiFiClient {
      * @param flowJsonPath La ruta al fichero con el JSON Template (flujo)
      * @param dynamicVariables Mapa clave-valor (ej: "##TABLA_ORIGEN##" -> "clientes") a incrustar
      */
-    public String uploadFlowDefinition(String parentId, String groupName, int positionY, Path flowJsonPath, java.util.Map<String, String> dynamicVariables) throws Exception {
+    public String uploadFlowDefinition(String parentId, String groupName, int positionY, Path flowJsonPath, Map<String, String> dynamicVariables) throws Exception {
         if (jwtToken == null) {
             throw new IllegalStateException("Cliente no autenticado.");
         }
@@ -191,7 +192,7 @@ public class NiFiClient {
 
         // Parametrización en caliente: Buscamos e insertamos los tokens dinámicos de cada tabla
         if (dynamicVariables != null) {
-            for (java.util.Map.Entry<String, String> entry : dynamicVariables.entrySet()) {
+            for (Map.Entry<String, String> entry : dynamicVariables.entrySet()) {
                 fileContent = fileContent.replace(entry.getKey(), entry.getValue());
             }
         }
@@ -317,7 +318,7 @@ public class NiFiClient {
     public List<String> collectFailureDiagnostics(String processGroupId) {
         try {
             ensureAuthenticated();
-            java.util.Map<String, String> failureProcessors = collectFailureProcessors(processGroupId);
+            Map<String, String> failureProcessors = collectFailureProcessors(processGroupId);
             if (failureProcessors.isEmpty()) {
                 throw new IllegalStateException("No se encontraron procesadores NiFiFailure_ en el flujo. "
                         + "No se puede verificar de forma segura si NiFi terminó con errores internos.");
@@ -335,13 +336,13 @@ public class NiFiClient {
         }
     }
 
-    private java.util.Map<String, String> collectFailureProcessors(String processGroupId) throws Exception {
-        java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+    private Map<String, String> collectFailureProcessors(String processGroupId) throws Exception {
+        Map<String, String> result = new LinkedHashMap<>();
         collectFailureProcessorsFromFlow(processGroupId, result, new LinkedHashSet<>());
         return result;
     }
 
-    private void collectFailureProcessorsFromFlow(String processGroupId, java.util.Map<String, String> result, Set<String> visitedGroups) throws Exception {
+    private void collectFailureProcessorsFromFlow(String processGroupId, Map<String, String> result, Set<String> visitedGroups) throws Exception {
         if (processGroupId == null || processGroupId.isBlank() || !visitedGroups.add(processGroupId)) {
             return;
         }
@@ -378,7 +379,7 @@ public class NiFiClient {
         }
     }
 
-    private void collectFailureProcessorStatus(JsonElement element, java.util.Map<String, String> failureProcessors, List<String> diagnostics) {
+    private void collectFailureProcessorStatus(JsonElement element, Map<String, String> failureProcessors, List<String> diagnostics) {
         if (element == null || element.isJsonNull()) {
             return;
         }
