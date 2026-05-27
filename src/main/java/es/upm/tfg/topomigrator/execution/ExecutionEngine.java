@@ -1,6 +1,7 @@
 package es.upm.tfg.topomigrator.execution;
 
 import com.google.gson.JsonObject;
+import es.upm.tfg.topomigrator.audit.ErrorArtifactWriter;
 import es.upm.tfg.topomigrator.audit.ExecutionIdGenerator;
 import es.upm.tfg.topomigrator.audit.SummaryTrace;
 import es.upm.tfg.topomigrator.audit.TableTrace;
@@ -48,6 +49,7 @@ public class ExecutionEngine {
 
     private final NiFiClient nifiClient;
     private final TraceabilityManager traceManager;
+    private final ErrorArtifactWriter errorArtifactWriter;
     private final TableMetricsService metricsService;
     private final IncrementalStateService incrementalStateService;
     private final FlowVariableBuilder flowVariableBuilder;
@@ -57,13 +59,30 @@ public class ExecutionEngine {
     private final int nifiMaxMonitorChecks;
 
     public ExecutionEngine() {
-        this(new NiFiClient(), new TraceabilityManager(), new TableMetricsService(), new IncrementalStateService(), 5000L, 3000L, 1200);
+        this(new ErrorArtifactWriter());
+    }
+
+    public ExecutionEngine(ErrorArtifactWriter errorArtifactWriter) {
+        this(new NiFiClient(), new TraceabilityManager(), new TableMetricsService(), new IncrementalStateService(),
+                errorArtifactWriter, 5000L, 3000L, 1200);
     }
 
     ExecutionEngine(NiFiClient nifiClient,
                     TraceabilityManager traceManager,
                     TableMetricsService metricsService,
                     IncrementalStateService incrementalStateService,
+                    long nifiInitialWaitMs,
+                    long nifiPollWaitMs,
+                    int nifiMaxMonitorChecks) {
+        this(nifiClient, traceManager, metricsService, incrementalStateService, new ErrorArtifactWriter(),
+                nifiInitialWaitMs, nifiPollWaitMs, nifiMaxMonitorChecks);
+    }
+
+    ExecutionEngine(NiFiClient nifiClient,
+                    TraceabilityManager traceManager,
+                    TableMetricsService metricsService,
+                    IncrementalStateService incrementalStateService,
+                    ErrorArtifactWriter errorArtifactWriter,
                     long nifiInitialWaitMs,
                     long nifiPollWaitMs,
                     int nifiMaxMonitorChecks) {
@@ -75,6 +94,7 @@ public class ExecutionEngine {
         }
         this.nifiClient = nifiClient;
         this.traceManager = traceManager;
+        this.errorArtifactWriter = errorArtifactWriter != null ? errorArtifactWriter : new ErrorArtifactWriter();
         this.metricsService = metricsService;
         this.incrementalStateService = incrementalStateService;
         this.flowVariableBuilder = new FlowVariableBuilder(metricsService);
@@ -168,6 +188,13 @@ public class ExecutionEngine {
                 } catch (Exception e) {
                     logger.error("Error migrando tabla {} ({}): {}", tableName, e.getClass().getSimpleName(), sanitizeDiagnostic(e.getMessage()));
                     markTableAsFailed(summary, tableTrace, tableName, e);
+                    errorArtifactWriter.writeTableError(
+                            executionId,
+                            tableTrace.tableExecutionId,
+                            "NIFI_TABLE_EXECUTION",
+                            formatTraceTable(tableTrace, tableName),
+                            e
+                    );
                     failedOrBlockedTables.add(canonicalTableKey(tableName, tableIdentityIndex));
                 } finally {
                     tableTrace.timing.endTime = LocalDateTime.now().format(formatter);
@@ -192,6 +219,7 @@ public class ExecutionEngine {
 
         } catch (Exception e) {
             logger.error("Fallo crítico general en el motor de ejecución y tracking: {}", sanitizeDiagnostic(e.getMessage()), e);
+            errorArtifactWriter.writeExecutionError(executionId, "NIFI_EXECUTION", e);
             criticalFailure = new IllegalStateException("Fallo crítico general en el motor de ejecución.", e);
         } finally {
             summary.timing.endTime = LocalDateTime.now().format(formatter);
@@ -530,6 +558,14 @@ public class ExecutionEngine {
         return schema + "." + table;
     }
 
+    private String formatTraceTable(TableTrace tableTrace, String fallbackName) {
+        if (tableTrace != null && tableTrace.table != null && tableTrace.table.target != null
+                && tableTrace.table.target.name != null && !tableTrace.table.target.name.isBlank()) {
+            return qualifiedName(tableTrace.table.target.schema, tableTrace.table.target.name);
+        }
+        return fallbackName;
+    }
+
     private void markTableAsBlocked(SummaryTrace summary, TableTrace tableTrace, String tableName, List<String> blockingParents) {
         logger.warn("Tabla {} bloqueada porque una o más tablas padre no terminaron correctamente: {}", tableName, blockingParents);
         tableTrace.status = STATUS_BLOCKED;
@@ -560,18 +596,7 @@ public class ExecutionEngine {
     }
 
     private String sanitizeDiagnostic(String message) {
-        if (message == null || message.isBlank()) {
-            return "Fallo de ejecucion sin diagnostico disponible.";
-        }
-        String sanitized = message;
-        sanitized = sanitized.replaceAll("(?i)(password|pwd|token|jwt|secret|api_key|apikey)(\\s*[=:]\\s*)[^\\s,;}&]+", "$1$2[REDACTED]");
-        sanitized = sanitized.replaceAll("(?i)(\"(?:password|pwd|token|jwt|secret|api_key|apikey)\"\\s*:\\s*\")[^\"]*(\")", "$1[REDACTED]$2");
-        sanitized = sanitized.replaceAll("(?i)(https?://[^\\s/@:]+:)[^\\s/@]+(@)", "$1[REDACTED]$2");
-        sanitized = sanitized.replaceAll("(?i)Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer [REDACTED]");
-        sanitized = sanitized.replaceAll("(?i)(Authorization:\\s*Bearer\\s+)[A-Za-z0-9._\\-]+", "$1[REDACTED]");
-        // Redacta credenciales en parámetros de query de URLs JDBC o HTTP
-        sanitized = sanitized.replaceAll("(?i)([?&](?:password|pwd|token|jwt|secret|api_key|apikey)=)[^&\\s]*", "$1[REDACTED]");
-        return sanitized;
+        return ErrorArtifactWriter.sanitize(message);
     }
 
     private TableTrace createBaseTableTrace(String executionId,

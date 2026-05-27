@@ -1,5 +1,6 @@
 package es.upm.tfg.topomigrator;
 
+import es.upm.tfg.topomigrator.audit.ErrorArtifactWriter;
 import es.upm.tfg.topomigrator.config.ContractLoader;
 import es.upm.tfg.topomigrator.execution.ExecutionEngine;
 import es.upm.tfg.topomigrator.execution.LiquibaseSchemaExecutor;
@@ -40,6 +41,8 @@ public class App {
         OutputCleaner.cleanOutputs();
         OutputDirectoryInitializer.ensureOutputDirectories();
         Logger logger = LoggerFactory.getLogger(App.class);
+        ErrorArtifactWriter errorArtifactWriter = new ErrorArtifactWriter();
+        Map<String, Object> errorContext = new LinkedHashMap<>();
         logger.info("Iniciando orquestador TopoMigrator...");
 
         try {
@@ -48,27 +51,40 @@ public class App {
                 configPathEnv = "configs/contract.yaml";
             }
             Path configPath = Paths.get(configPathEnv);
+            errorContext.put("configPath", configPath.toString());
 
             ContractLoader loader = new ContractLoader();
-            MigrationContract loadedContract = loader.load(configPath);
+            MigrationContract loadedContract = runPhase("CONTRACT_LOAD", errorArtifactWriter, errorContext,
+                    () -> loader.load(configPath));
 
-            MigrationContract contract = MigrationContractUtils.retainEnabledTables(loadedContract);
-            if (contract.getTables() == null || contract.getTables().isEmpty()) {
-                throw new IllegalStateException("No hay tablas activas en el contrato de migración.");
-            }
+            MigrationContract contract = runPhase("CONTRACT_FILTERING", errorArtifactWriter, errorContext, () -> {
+                MigrationContract activeContract = MigrationContractUtils.retainEnabledTables(loadedContract);
+                if (activeContract.getTables() == null || activeContract.getTables().isEmpty()) {
+                    throw new IllegalStateException("No hay tablas activas en el contrato de migracion.");
+                }
+                return activeContract;
+            });
+            errorContext.put("activeTables", new ArrayList<>(contract.getTables().keySet()));
             logger.info("Tablas activas a procesar: {}", contract.getTables().keySet());
 
-            DatabaseConfig database = requireDatabaseConfig(contract);
-            DatabaseConnectionManager.testConnection(database.getSourceConnection(), "Base de Datos Origen");
-            DatabaseConnectionManager.testConnection(database.getTargetConnection(), "Base de Datos Destino");
+            DatabaseConfig database = runPhase("DATABASE_CONFIG_VALIDATION", errorArtifactWriter, errorContext,
+                    () -> requireDatabaseConfig(contract));
+            runPhase("DATASOURCE_CONNECTION_TEST", errorArtifactWriter, errorContext, () -> {
+                DatabaseConnectionManager.testConnection(database.getSourceConnection(), "Base de Datos Origen");
+                DatabaseConnectionManager.testConnection(database.getTargetConnection(), "Base de Datos Destino");
+            });
 
-            SchemaCompatibilityValidator.validateSourceSchemas(contract);
+            runPhase("SOURCE_SCHEMA_VALIDATION", errorArtifactWriter, errorContext,
+                    () -> SchemaCompatibilityValidator.validateSourceSchemas(contract));
 
-            TargetChangelogValidator.validate(contract);
+            runPhase("CHANGELOG_VALIDATION", errorArtifactWriter, errorContext,
+                    () -> TargetChangelogValidator.validate(contract));
 
-            LiquibaseSchemaExecutor.applyTargetSchemas(contract);
+            runPhase("LIQUIBASE_EXECUTION", errorArtifactWriter, errorContext,
+                    () -> LiquibaseSchemaExecutor.applyTargetSchemas(contract));
 
-            SchemaCompatibilityValidator.validateTargetAndMapping(contract);
+            runPhase("SCHEMA_COMPATIBILITY_VALIDATION", errorArtifactWriter, errorContext,
+                    () -> SchemaCompatibilityValidator.validateTargetAndMapping(contract));
 
             Map<String, String> physicalToContractKey = new LinkedHashMap<>();
             for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
@@ -76,11 +92,12 @@ public class App {
                 physicalToContractKey.put(physicalId, entry.getKey());
             }
 
-            List<ForeignKeyDependency> rawDependencies;
-            try (Connection sourceConnection = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection())) {
-                MetadataDependencyExtractor extractor = new MetadataDependencyExtractor();
-                rawDependencies = extractor.extractDependencies(sourceConnection, physicalToContractKey.keySet());
-            }
+            List<ForeignKeyDependency> rawDependencies = runPhase("DEPENDENCY_EXTRACTION", errorArtifactWriter, errorContext, () -> {
+                try (Connection sourceConnection = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection())) {
+                    MetadataDependencyExtractor extractor = new MetadataDependencyExtractor();
+                    return extractor.extractDependencies(sourceConnection, physicalToContractKey.keySet());
+                }
+            });
 
             List<ForeignKeyDependency> dependencies = new ArrayList<>();
             for (ForeignKeyDependency dep : rawDependencies) {
@@ -92,16 +109,49 @@ public class App {
             }
 
             DependencyResolver resolver = new DependencyResolver();
-            List<TableNode> executionOrder = resolver.resolveExecutionOrder(contract.getTables().keySet(), dependencies);
+            List<TableNode> executionOrder = runPhase("DEPENDENCY_RESOLUTION", errorArtifactWriter, errorContext,
+                    () -> resolver.resolveExecutionOrder(contract.getTables().keySet(), dependencies));
 
-            ExecutionEngine engine = new ExecutionEngine();
+            ExecutionEngine engine = new ExecutionEngine(errorArtifactWriter);
             engine.executeMigration(executionOrder, contract, dependencies);
 
-            logger.info("Migración orquestada y desplegada correctamente.");
+            logger.info("Migracion orquestada y desplegada correctamente.");
 
         } catch (Exception e) {
-            logger.error("Error crítico durante la orquestación de la migración: ", e);
+            logger.error("Error critico durante la orquestacion de la migracion: ", e);
             System.exit(1);
         }
+    }
+
+    private static <T> T runPhase(String phase,
+                                  ErrorArtifactWriter errorArtifactWriter,
+                                  Map<String, Object> errorContext,
+                                  PhaseSupplier<T> action) throws Exception {
+        try {
+            return action.run();
+        } catch (Exception e) {
+            errorArtifactWriter.writeOrchestrationError(phase, e, new LinkedHashMap<>(errorContext));
+            throw e;
+        }
+    }
+
+    private static void runPhase(String phase,
+                                 ErrorArtifactWriter errorArtifactWriter,
+                                 Map<String, Object> errorContext,
+                                 PhaseAction action) throws Exception {
+        runPhase(phase, errorArtifactWriter, errorContext, () -> {
+            action.run();
+            return null;
+        });
+    }
+
+    @FunctionalInterface
+    private interface PhaseSupplier<T> {
+        T run() throws Exception;
+    }
+
+    @FunctionalInterface
+    private interface PhaseAction {
+        void run() throws Exception;
     }
 }

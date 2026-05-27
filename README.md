@@ -401,12 +401,12 @@ Important paths:
 outputs/logs/                               execution logs
 outputs/traces/summary.json                 global execution summary
 outputs/traces/tables/<schema>.<table>.json individual table traces
-outputs/errors/                             error artifacts
+outputs/errors/                             error log and compact JSON error artifacts
 outputs/flows/                              temporary flow artifacts
 outputs/state/incremental-state.json        persisted incremental cursor state
 ```
 
-At startup, the Java application cleans temporary traces, errors, and flows. It keeps logs and incremental state.
+At startup, the Java application cleans temporary traces, errors, and flows. It keeps logs and incremental state. When a real error occurs, `outputs/errors` receives a compact JSON artifact with the failing execution phase and sanitized explanation; blocked tables remain in the summary and table traces.
 
 Table final statuses:
 

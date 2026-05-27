@@ -1,6 +1,7 @@
 package es.upm.tfg.topomigrator.execution;
 
 import com.google.gson.JsonObject;
+import es.upm.tfg.topomigrator.audit.ErrorArtifactWriter;
 import es.upm.tfg.topomigrator.audit.SummaryTrace;
 import es.upm.tfg.topomigrator.audit.TableTrace;
 import es.upm.tfg.topomigrator.audit.TraceabilityManager;
@@ -76,6 +77,8 @@ public class ExecutionEngineQualityTest {
         assertEquals("FAILED", traces.tableTraces.get(0).status);
         assertEquals("BLOCKED", traces.tableTraces.get(1).status);
         assertEquals(List.of("Migracion_customers"), nifi.uploadedGroups);
+        assertEquals(List.of("NIFI_TABLE_EXECUTION:public.customers:RuntimeException"), errorWriter(engine).tableErrors);
+        assertEquals(List.of(), errorWriter(engine).executionErrors);
     }
 
     @Test
@@ -129,11 +132,38 @@ public class ExecutionEngineQualityTest {
 
         assertTrue(error.getMessage().contains("Fallo crítico general"));
         assertEquals(List.of(), nifi.uploadedGroups);
+        assertEquals(List.of("NIFI_EXECUTION:RuntimeException"), errorWriter(engine).executionErrors);
     }
 
     private ExecutionEngine engine(RecordingNiFiClient nifi, RecordingTraceabilityManager traces, CountingMetricsService metrics) throws Exception {
         Path stateFile = temporaryFolder.newFolder("state").toPath().resolve("incremental-state.json");
-        return new ExecutionEngine(nifi, traces, metrics, new IncrementalStateService(stateFile), 0L, 0L, 5);
+        return new ExecutionEngine(nifi, traces, metrics, new IncrementalStateService(stateFile),
+                new RecordingErrorArtifactWriter(), 0L, 0L, 5);
+    }
+
+    private RecordingErrorArtifactWriter errorWriter(ExecutionEngine engine) throws Exception {
+        java.lang.reflect.Field field = ExecutionEngine.class.getDeclaredField("errorArtifactWriter");
+        field.setAccessible(true);
+        return (RecordingErrorArtifactWriter) field.get(engine);
+    }
+
+    private static final class RecordingErrorArtifactWriter extends ErrorArtifactWriter {
+        private final List<String> tableErrors = new ArrayList<>();
+        private final List<String> executionErrors = new ArrayList<>();
+
+        @Override
+        public void writeTableError(String executionId,
+                                    String tableExecutionId,
+                                    String executionPhase,
+                                    String table,
+                                    Exception error) {
+            tableErrors.add(executionPhase + ":" + table + ":" + error.getClass().getSimpleName());
+        }
+
+        @Override
+        public void writeExecutionError(String executionId, String executionPhase, Exception error) {
+            executionErrors.add(executionPhase + ":" + error.getClass().getSimpleName());
+        }
     }
 
     private static final class RecordingTraceabilityManager extends TraceabilityManager {
