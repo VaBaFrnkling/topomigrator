@@ -11,22 +11,16 @@ services:
       - ./outputs:/app/outputs
       - ./changelogs:/app/changelogs
     environment:
-      NIFI_BASE_URL: ${NIFI_BASE_URL:-https://nifi:8443/nifi-api}
+      NIFI_BASE_URL: https://nifi:8443/nifi-api
       NIFI_USERNAME: ${NIFI_USERNAME:?NIFI_USERNAME no configurado}
       NIFI_PASSWORD: ${NIFI_PASSWORD:?NIFI_PASSWORD no configurado}
-      MIGRATION_CONFIG_PATH: ${MIGRATION_CONFIG_PATH:-/app/configs/contract.yaml}
-      DATASOURCES_CONFIG_PATH: ${DATASOURCES_CONFIG_PATH:-/app/configs/datasources.yaml}
-      INCREMENTAL_STATE_PATH: ${INCREMENTAL_STATE_PATH:-/app/outputs/state/incremental-state.json}
-      NIFI_ALLOW_INSECURE_LOCAL_TLS: ${NIFI_ALLOW_INSECURE_LOCAL_TLS:-true}
-      SOURCE_DB_DRIVER: ${SOURCE_DB_DRIVER:-org.postgresql.Driver}
-      SOURCE_DB_DRIVER_LOCATION: ${SOURCE_DB_DRIVER_LOCATION:-/opt/nifi/drivers/postgresql-42.7.10.jar}
-      SOURCE_DB_TYPE: ${SOURCE_DB_TYPE:-PostgreSQL}
+      MIGRATION_CONFIG_PATH: /app/configs/contract.yaml
+      DATASOURCES_CONFIG_PATH: /app/configs/datasources.yaml
+      INCREMENTAL_STATE_PATH: /app/outputs/state/incremental-state.json
+      NIFI_ALLOW_INSECURE_LOCAL_TLS: "true"
       SOURCE_DB_JDBC_URL: ${SOURCE_DB_JDBC_URL:?SOURCE_DB_JDBC_URL no configurado}
       SOURCE_DB_USERNAME: ${SOURCE_DB_USERNAME:?SOURCE_DB_USERNAME no configurado}
       SOURCE_DB_PASSWORD: ${SOURCE_DB_PASSWORD:?SOURCE_DB_PASSWORD no configurado}
-      TARGET_DB_DRIVER: ${TARGET_DB_DRIVER:-org.postgresql.Driver}
-      TARGET_DB_DRIVER_LOCATION: ${TARGET_DB_DRIVER_LOCATION:-/opt/nifi/drivers/postgresql-42.7.10.jar}
-      TARGET_DB_TYPE: ${TARGET_DB_TYPE:-PostgreSQL}
       TARGET_DB_JDBC_URL: ${TARGET_DB_JDBC_URL:?TARGET_DB_JDBC_URL no configurado}
       TARGET_DB_USERNAME: ${TARGET_DB_USERNAME:?TARGET_DB_USERNAME no configurado}
       TARGET_DB_PASSWORD: ${TARGET_DB_PASSWORD:?TARGET_DB_PASSWORD no configurado}

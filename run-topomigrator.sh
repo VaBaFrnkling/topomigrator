@@ -3,33 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-normalize_host_path() {
-  local path="$1"
-  if command -v cygpath >/dev/null 2>&1 && [[ "$path" == *\\* || "$path" =~ ^[A-Za-z]: ]]; then
-    cygpath -u "$path"
-  else
-    printf '%s\n' "$path"
-  fi
-}
-
-SCRIPTS_DIR="$(normalize_host_path "${TOPOMIGRATOR_SCRIPTS_DIR:-$ROOT_DIR/scripts}")"
 ENV_FILE="$ROOT_DIR/.env"
-
-if [[ -f "$ENV_FILE" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-fi
-
-if [[ ! -f "$SCRIPTS_DIR/01-env.sh" ]]; then
-  echo "ERROR: falta scripts/01-env.sh en $SCRIPTS_DIR" >&2
-  exit 1
-fi
-
-# shellcheck disable=SC1090
-source "$SCRIPTS_DIR/01-env.sh"
 
 CONFIG_DIR="$ROOT_DIR/configs"
 CHANGELOG_DIR="$ROOT_DIR/changelogs/tables"
@@ -49,15 +23,43 @@ log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$RUN_LOG"
 }
 
-run_script() {
-  local script_name="$1"
-  shift || true
-  if [[ ! -f "$SCRIPTS_DIR/$script_name" ]]; then
-    log "ERROR: falta scripts/$script_name en $SCRIPTS_DIR"
+load_env_file() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    log "ERROR: falta $ENV_FILE"
+    log "Crea .env manualmente a partir de .env.example antes de ejecutar el runner."
     exit 1
   fi
-  log "Ejecutando script: scripts/$script_name $*"
-  bash "$SCRIPTS_DIR/$script_name" "$@" 2>&1 | tee -a "$RUN_LOG"
+
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+}
+
+require_env_var() {
+  local variable_name="$1"
+  if [[ -z "${!variable_name:-}" ]]; then
+    log "ERROR: la variable $variable_name es obligatoria en $ENV_FILE"
+    exit 1
+  fi
+}
+
+validate_env_file() {
+  local required_vars=(
+    NIFI_USERNAME
+    NIFI_PASSWORD
+    SOURCE_DB_JDBC_URL
+    SOURCE_DB_USERNAME
+    SOURCE_DB_PASSWORD
+    TARGET_DB_JDBC_URL
+    TARGET_DB_USERNAME
+    TARGET_DB_PASSWORD
+  )
+
+  local variable_name
+  for variable_name in "${required_vars[@]}"; do
+    require_env_var "$variable_name"
+  done
 }
 
 run_step() {
@@ -85,6 +87,7 @@ diagnose_on_failure() {
   log "ERROR: run-topomigrator.sh fallo con estado $status."
   log "Diagnostico basico:"
   log "ROOT_DIR=$ROOT_DIR"
+  log "ENV_FILE=$ENV_FILE"
   log "CONFIG_DIR=$CONFIG_DIR"
   log "CHANGELOG_DIR=$CHANGELOG_DIR"
   log "OUTPUTS_DIR=$OUTPUTS_DIR"
@@ -106,13 +109,6 @@ has_configs() {
 
 has_changelogs() {
   find "$CHANGELOG_DIR" -maxdepth 1 -type f -name '*.yaml' -print -quit 2>/dev/null | grep -q .
-}
-
-env_is_current() {
-  [[ -f "$ROOT_DIR/.env" ]] &&
-  grep -Fq "MIGRATION_CONFIG_PATH=/app/configs/contract.yaml" "$ROOT_DIR/.env" &&
-  grep -Fq "DATASOURCES_CONFIG_PATH=/app/configs/datasources.yaml" "$ROOT_DIR/.env" &&
-  grep -Fq "INCREMENTAL_STATE_PATH=/app/outputs/state/incremental-state.json" "$ROOT_DIR/.env"
 }
 
 postgres_is_ready() {
@@ -137,8 +133,10 @@ postgres_jdbc_url_is_ready() {
 
 log "Inicio run-topomigrator.sh"
 log "ROOT_DIR=$ROOT_DIR"
-log "SCRIPTS_DIR=$SCRIPTS_DIR"
+log "ENV_FILE=$ENV_FILE"
 log "RUN_LOG=$RUN_LOG"
+
+load_env_file
 
 run_step \
   "Validar raiz del proyecto" \
@@ -149,6 +147,11 @@ run_step \
   "Crear carpetas reales del proyecto" \
   "[[ -d '$CONFIG_DIR' && -d '$CHANGELOG_DIR' && -d '$LOG_DIR' && -d '$STATE_DIR' && -d '$TRACE_DIR/tables' ]]" \
   "mkdir -p '$CONFIG_DIR' '$CHANGELOG_DIR' '$LOG_DIR' '$STATE_DIR' '$TRACE_DIR/tables' '$FLOW_DIR' '$ERROR_DIR'"
+
+run_step \
+  "Validar .env" \
+  "validate_env_file" \
+  "exit 1"
 
 run_step \
   "Validar configs reales" \
@@ -164,11 +167,6 @@ run_step \
   "Comprobar PostgreSQL" \
   "postgres_is_ready" \
   "echo 'ERROR: PostgreSQL no esta listo o las credenciales configuradas no funcionan.'; echo 'Prepara manualmente las bases/usuarios y vuelve a ejecutar el runner.'; exit 1"
-
-run_step \
-  "Generar .env con rutas del proyecto" \
-  "env_is_current" \
-  "run_script '02-write-env-file.sh'"
 
 run_step \
   "Ejecutar TopoMigrator" \
