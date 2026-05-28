@@ -2,9 +2,6 @@ package es.upm.tfg.topomigrator.model;
 
 import java.util.Map;
 
-/**
- * Representa el contrato de migración completo definido en contract.yaml.
- */
 public class MigrationContract {
 
     private MigrationInfo migration;

@@ -5,26 +5,9 @@ import es.upm.tfg.topomigrator.model.TableRef;
 
 import java.util.Locale;
 
-/**
- * Utilidad para construir una identidad física única de tabla basada en schema.table.
- * Se usa únicamente para resolución de dependencias, comparación y búsqueda interna.
- */
 public final class TableIdentityUtils {
 
-    public static final String DEFAULT_SCHEMA = "public";
-
     private TableIdentityUtils() {
-    }
-
-    public static String normalizeSchema(String schema) {
-        return SchemaTableIdentifierUtils.normalizeSchema(schema);
-    }
-
-    public static String normalizeTable(String table) {
-        if (table == null || table.trim().isEmpty()) {
-            throw new IllegalArgumentException("El nombre de tabla no puede ser nulo o vacío.");
-        }
-        return table.trim().toLowerCase(Locale.ROOT);
     }
 
     public static String toPhysicalId(String schema, String table) {

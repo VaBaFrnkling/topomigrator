@@ -1,8 +1,5 @@
 package es.upm.tfg.topomigrator.model;
 
-/**
- * Metadatos generales del contrato de migración.
- */
 public class MigrationInfo {
 
     private String name;

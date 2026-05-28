@@ -1,8 +1,5 @@
 package es.upm.tfg.topomigrator.model;
 
-/**
- * Referencia a una tabla en una base de datos (esquema + nombre de tabla).
- */
 public class TableRef {
 
     private String schema;

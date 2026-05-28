@@ -1,8 +1,5 @@
 package es.upm.tfg.topomigrator.model;
 
-/**
- * Configuración de las conexiones a las bases de datos origen y destino.
- */
 public class DatabaseConfig {
 
     private ConnectionConfig sourceConnection;

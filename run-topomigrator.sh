@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# ============================================================
-# run-topomigrator.sh - Orquestador de TopoMigrator
-# ============================================================
-# Debe vivir en la raiz del proyecto, al mismo nivel que configs,
-# changelogs, outputs, Dockerfile y docker-compose.yaml.
-#
-# Usa siempre las carpetas reales del proyecto:
-#   configs/contract.yaml
-#   configs/datasources.yaml
-#   changelogs/tables/*.yaml
-#   outputs/logs/
-#   outputs/traces/
-#
-# No depende de datos de prueba externos. Usa configs/ y changelogs/tables/.
 
 set -euo pipefail
 
@@ -37,6 +23,14 @@ if [[ -f "$ENV_FILE" ]]; then
   set +a
 fi
 
+if [[ ! -f "$SCRIPTS_DIR/01-env.sh" ]]; then
+  echo "ERROR: falta scripts/01-env.sh en $SCRIPTS_DIR" >&2
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$SCRIPTS_DIR/01-env.sh"
+
 CONFIG_DIR="$ROOT_DIR/configs"
 CHANGELOG_DIR="$ROOT_DIR/changelogs/tables"
 OUTPUTS_DIR="$ROOT_DIR/outputs"
@@ -48,36 +42,6 @@ ERROR_DIR="$OUTPUTS_DIR/errors"
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 RUN_LOG="$LOG_DIR/run-topomigrator-$RUN_ID.log"
-
-SOURCE_DB="${SOURCE_DB:-topomigrator_source}"
-TARGET_DB="${TARGET_DB:-topomigrator_target}"
-PG_USER="${PG_USER:-topomigrator_user}"
-PG_PASSWORD="${PG_PASSWORD:-Topomigrator123!}"
-PG_PORT="${PG_PORT:-5432}"
-CONTAINER_DB_HOST="${CONTAINER_DB_HOST:-host.docker.internal}"
-PG_HOST_FOR_CONTAINERS="${PG_HOST_FOR_CONTAINERS:-$CONTAINER_DB_HOST}"
-
-SOURCE_DB_DRIVER="${SOURCE_DB_DRIVER:-org.postgresql.Driver}"
-TARGET_DB_DRIVER="${TARGET_DB_DRIVER:-org.postgresql.Driver}"
-SOURCE_DB_TYPE="${SOURCE_DB_TYPE:-PostgreSQL}"
-TARGET_DB_TYPE="${TARGET_DB_TYPE:-PostgreSQL}"
-SOURCE_DB_DRIVER_LOCATION="${SOURCE_DB_DRIVER_LOCATION:-/opt/nifi/drivers/postgresql-42.7.10.jar}"
-TARGET_DB_DRIVER_LOCATION="${TARGET_DB_DRIVER_LOCATION:-/opt/nifi/drivers/postgresql-42.7.10.jar}"
-SOURCE_DB_JDBC_URL="${SOURCE_DB_JDBC_URL:-jdbc:postgresql://${PG_HOST_FOR_CONTAINERS}:${PG_PORT}/${SOURCE_DB}}"
-TARGET_DB_JDBC_URL="${TARGET_DB_JDBC_URL:-jdbc:postgresql://${PG_HOST_FOR_CONTAINERS}:${PG_PORT}/${TARGET_DB}}"
-SOURCE_DB_USERNAME="${SOURCE_DB_USERNAME:-$PG_USER}"
-SOURCE_DB_PASSWORD="${SOURCE_DB_PASSWORD:-$PG_PASSWORD}"
-TARGET_DB_USERNAME="${TARGET_DB_USERNAME:-$PG_USER}"
-TARGET_DB_PASSWORD="${TARGET_DB_PASSWORD:-$PG_PASSWORD}"
-
-NIFI_USERNAME="${NIFI_USERNAME:-nifi_user}"
-NIFI_PASSWORD="${NIFI_PASSWORD:-Topomigrator123!Topomigrator123!}"
-NIFI_BASE_URL="${NIFI_BASE_URL:-https://nifi:8443/nifi-api}"
-NIFI_ALLOW_INSECURE_LOCAL_TLS="${NIFI_ALLOW_INSECURE_LOCAL_TLS:-true}"
-
-MIGRATION_CONFIG_PATH="${MIGRATION_CONFIG_PATH:-/app/configs/contract.yaml}"
-DATASOURCES_CONFIG_PATH="${DATASOURCES_CONFIG_PATH:-/app/configs/datasources.yaml}"
-INCREMENTAL_STATE_PATH="${INCREMENTAL_STATE_PATH:-/app/outputs/state/incremental-state.json}"
 
 mkdir -p "$LOG_DIR" "$TRACE_DIR" "$TRACE_DIR/tables" "$STATE_DIR" "$FLOW_DIR" "$ERROR_DIR"
 
@@ -153,8 +117,22 @@ env_is_current() {
 
 postgres_is_ready() {
   command -v psql >/dev/null 2>&1 &&
-  PGPASSWORD="$PG_PASSWORD" psql -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d "$SOURCE_DB" -c "SELECT 1;" >/dev/null 2>&1 &&
-  PGPASSWORD="$PG_PASSWORD" psql -h 127.0.0.1 -p "$PG_PORT" -U "$PG_USER" -d "$TARGET_DB" -c "SELECT 1;" >/dev/null 2>&1
+  postgres_jdbc_url_is_ready "$SOURCE_DB_JDBC_URL" "$SOURCE_DB_USERNAME" "$SOURCE_DB_PASSWORD" &&
+  postgres_jdbc_url_is_ready "$TARGET_DB_JDBC_URL" "$TARGET_DB_USERNAME" "$TARGET_DB_PASSWORD"
+}
+
+postgres_jdbc_url_is_ready() {
+  local jdbc_url="$1"
+  local username="$2"
+  local password="$3"
+
+  [[ "$jdbc_url" =~ ^jdbc:postgresql://([^/:?]+)(:([0-9]+))?/([^?]+) ]] || return 1
+
+  local host="${BASH_REMATCH[1]}"
+  local port="${BASH_REMATCH[3]:-5432}"
+  local database="${BASH_REMATCH[4]}"
+
+  PGPASSWORD="$password" psql -h "$host" -p "$port" -U "$username" -d "$database" -c "SELECT 1;" >/dev/null 2>&1
 }
 
 log "Inicio run-topomigrator.sh"

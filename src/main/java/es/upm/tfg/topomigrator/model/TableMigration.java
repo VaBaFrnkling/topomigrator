@@ -1,8 +1,5 @@
 package es.upm.tfg.topomigrator.model;
 
-/**
- * Definición de la migración de una tabla: origen, destino, tipo y reglas.
- */
 public class TableMigration {
 
     private TableRef source;

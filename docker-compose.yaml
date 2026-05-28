@@ -1,11 +1,4 @@
-# Docker Compose para topomigrator
-# Levanta 2 servicios: app principal y Apache NiFi.
-# Las bases de datos se configuran externamente en configs/datasources.yaml.
-# Uso: docker compose up --build
-
 services:
-
-  # Aplicación principal — se construye desde el Dockerfile del proyecto
   topomigrator:
     build: .
     container_name: topomigrator
@@ -18,7 +11,6 @@ services:
       - ./outputs:/app/outputs
       - ./changelogs:/app/changelogs
     environment:
-      # API REST de NiFi (HTTPS obligatorio en 2.x)
       NIFI_BASE_URL: ${NIFI_BASE_URL:-https://nifi:8443/nifi-api}
       NIFI_USERNAME: ${NIFI_USERNAME:?NIFI_USERNAME no configurado}
       NIFI_PASSWORD: ${NIFI_PASSWORD:?NIFI_PASSWORD no configurado}
@@ -45,7 +37,6 @@ services:
     networks:
       - topomigrator-net
 
-  # Apache NiFi 2.x — UI en https://localhost:8443/nifi
   nifi:
     image: apache/nifi:2.9.0
     container_name: nifi

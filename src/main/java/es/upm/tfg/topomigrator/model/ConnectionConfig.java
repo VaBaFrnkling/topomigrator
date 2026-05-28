@@ -1,8 +1,5 @@
 package es.upm.tfg.topomigrator.model;
 
-/**
- * Parámetros de conexión JDBC a una base de datos.
- */
 public class ConnectionConfig {
 
     private String driver;

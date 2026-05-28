@@ -2,11 +2,6 @@ package es.upm.tfg.topomigrator.util;
 
 import java.util.Locale;
 
-/**
- * Utilidades para construir identificadores canónicos de tablas usando
- * esquema + nombre, evitando colisiones cuando existen tablas homónimas
- * en esquemas distintos.
- */
 public final class SchemaTableIdentifierUtils {
 
     public static final String DEFAULT_SCHEMA = "public";
@@ -34,9 +29,5 @@ public final class SchemaTableIdentifierUtils {
 
     public static String toTraceFileName(String schema, String table) {
         return toQualifiedIdentifier(schema, table) + ".json";
-    }
-
-    public static String toQualifiedChangelogStem(String schema, String table) {
-        return toQualifiedIdentifier(schema, table);
     }
 }

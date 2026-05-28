@@ -1,16 +1,11 @@
 package es.upm.tfg.topomigrator.util;
 
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 
-/**
- * Inicializa la estructura de salidas runtime que usa la aplicacion.
- */
 public final class OutputDirectoryInitializer {
     private static final Path OUTPUTS_ROOT = Paths.get("outputs");
     private static final List<Path> REQUIRED_DIRECTORIES = List.of(
@@ -34,6 +29,5 @@ public final class OutputDirectoryInitializer {
                 throw new IllegalStateException("No se pudo crear el directorio de salida " + directory.toAbsolutePath(), e);
             }
         }
-        LoggerFactory.getLogger(OutputDirectoryInitializer.class).info("Estructura de directorios outputs inicializada.");
     }
 }

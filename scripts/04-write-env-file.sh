@@ -1,31 +1,19 @@
 #!/usr/bin/env bash
-# ============================================================
-# 04-write-env-file.sh - Genera .env para Docker Compose
-# ============================================================
-# Modifica unicamente:
-#   $BASE_DIR/.env
-#
-# No toca bases de datos.
-# No toca outputs.
-# No borra configuracion.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/01-env.sh"
 
-SRC_URL="$SOURCE_DB_JDBC_URL"
-SRC_USER="$SOURCE_DB_USERNAME"
-SRC_PASS="$SOURCE_DB_PASSWORD"
 ENV_FILE="$BASE_DIR/.env"
 
 cat > "$ENV_FILE" <<ENV
 SOURCE_DB_DRIVER=$SOURCE_DB_DRIVER
 SOURCE_DB_DRIVER_LOCATION=$SOURCE_DB_DRIVER_LOCATION
 SOURCE_DB_TYPE=$SOURCE_DB_TYPE
-SOURCE_DB_JDBC_URL=$SRC_URL
-SOURCE_DB_USERNAME=$SRC_USER
-SOURCE_DB_PASSWORD=$SRC_PASS
+SOURCE_DB_JDBC_URL=$SOURCE_DB_JDBC_URL
+SOURCE_DB_USERNAME=$SOURCE_DB_USERNAME
+SOURCE_DB_PASSWORD=$SOURCE_DB_PASSWORD
 
 TARGET_DB_DRIVER=$TARGET_DB_DRIVER
 TARGET_DB_DRIVER_LOCATION=$TARGET_DB_DRIVER_LOCATION
@@ -46,5 +34,5 @@ ENV
 
 echo "OK: generado $ENV_FILE"
 echo "==> Host usado para PostgreSQL desde contenedores: $PG_HOST_FOR_CONTAINERS"
-echo "==> JDBC origen: $SRC_URL"
+echo "==> JDBC origen: $SOURCE_DB_JDBC_URL"
 echo "==> JDBC destino: $TARGET_DB_JDBC_URL"

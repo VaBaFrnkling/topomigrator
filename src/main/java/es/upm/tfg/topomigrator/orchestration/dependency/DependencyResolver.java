@@ -15,22 +15,10 @@ import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * Servicio de orquestación responsable de computar el orden seguro de ejecución
- * de la migración de tablas. Utiliza el algoritmo de Kahn para el ordenamiento topológico.
- */
 public class DependencyResolver {
 
     private static final Logger logger = LoggerFactory.getLogger(DependencyResolver.class);
 
-    /**
-     * Calcula el orden de ejecución de las tablas asegurando la integridad referencial.
-     * 
-     * @param includedTables Conjunto de tablas provistas para la migración.
-     * @param dependencies Dependencias de clave foránea explícitas entre tablas.
-     * @return Lista ordenada de TableNode listos para ejecutarse.
-     * @throws CycleDetectedException Si ciclos estructurales evitan la creación de un DAG válido.
-     */
     public List<TableNode> resolveExecutionOrder(Set<String> includedTables, List<ForeignKeyDependency> dependencies) {
         logger.info("Iniciando resolución de orden topológico para {} tablas...", includedTables != null ? includedTables.size() : 0);
         
@@ -87,9 +75,6 @@ public class DependencyResolver {
         return tableId.trim().toLowerCase(Locale.ROOT);
     }
 
-    /**
-     * Aplica rigurosamente el algoritmo matemático de Kahn en el DAG introducido.
-     */
     private List<TableNode> applyKahnsAlgorithm(DependencyGraph graph) {
         logger.debug("Aplicando procesador matemático de la capa (algoritmo de Kahn)...");
         Map<TableNode, Integer> inDegree = new HashMap<>(graph.getInDegree());

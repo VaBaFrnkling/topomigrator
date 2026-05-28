@@ -1,8 +1,5 @@
 package es.upm.tfg.topomigrator.model;
 
-/**
- * Filtros SQL opcionales para limitar los datos migrados.
- */
 public class FilterConfig {
 
     private String where;
