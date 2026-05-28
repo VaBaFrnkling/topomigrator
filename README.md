@@ -30,7 +30,7 @@ El runner:
 
 - valida `configs/` y `changelogs/`
 - comprueba conectividad PostgreSQL con `psql`
-- regenera `.env` con `scripts/04-write-env-file.sh`
+- regenera `.env` con `scripts/02-write-env-file.sh`
 - ejecuta `docker compose up --build --abort-on-container-exit`
 
 No crea usuarios, bases de datos ni reglas de red en PostgreSQL. Esa preparación es externa al proyecto.
@@ -38,7 +38,7 @@ No crea usuarios, bases de datos ni reglas de red en PostgreSQL. Esa preparació
 ## Scripts
 
 - `scripts/01-env.sh`: defaults compartidos
-- `scripts/04-write-env-file.sh`: genera `.env`
+- `scripts/02-write-env-file.sh`: genera `.env`
 
 ## Build y tests
 

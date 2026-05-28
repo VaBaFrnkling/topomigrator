@@ -168,7 +168,7 @@ run_step \
 run_step \
   "Generar .env con rutas del proyecto" \
   "env_is_current" \
-  "run_script '04-write-env-file.sh'"
+  "run_script '02-write-env-file.sh'"
 
 run_step \
   "Ejecutar TopoMigrator" \
