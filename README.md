@@ -62,16 +62,15 @@ Effective flow:
 4. Checks that `changelogs/tables/` contains YAML changelogs.
 5. Loads `.env` values for the runner, helper scripts, and Docker Compose.
 6. Checks PostgreSQL connectivity using `psql`.
-7. If PostgreSQL is not ready, runs `scripts/02-postgres-setup.sh`.
-8. Optionally runs `scripts/03-postgres-docker-access.sh` when `CONFIGURE_POSTGRES_DOCKER_ACCESS=true`.
-9. Creates or refreshes `.env` through `scripts/04-write-env-file.sh` when needed.
-10. Runs `docker compose up --build --abort-on-container-exit`.
-11. Prints a basic summary of generated outputs, trace statuses, and incremental state.
-12. If something fails, prints a basic diagnostic with paths, Docker Compose status, and recent container logs.
+7. Fails fast if PostgreSQL is not ready or the configured credentials do not work.
+8. Creates or refreshes `.env` through `scripts/04-write-env-file.sh` when needed.
+9. Runs `docker compose up --build --abort-on-container-exit`.
+10. Prints a basic summary of generated outputs, trace statuses, and incremental state.
+11. If something fails, prints a basic diagnostic with paths, Docker Compose status, and recent container logs.
 
 The script resolves paths from its own location, not from the shell's current directory. Paths are quoted, and Windows-style paths passed through variables are normalized with `cygpath` when available.
 
-Important: `scripts/02-postgres-setup.sh` and `scripts/03-postgres-docker-access.sh` use Linux administration commands such as `sudo`, `systemctl`, and the `postgres` system user. If your PostgreSQL is managed differently, create the databases/users yourself and provide the connection data in `.env`.
+Important: the runner does not create PostgreSQL roles/databases or modify host PostgreSQL networking. Prepare the databases/users yourself and provide the connection data in `.env`.
 
 ## Environment File
 
@@ -435,8 +434,6 @@ Current scripts:
 ```text
 run-topomigrator.sh                 main one-shot runner
 scripts/01-env.sh                   shared environment defaults
-scripts/02-postgres-setup.sh        creates PostgreSQL role/databases when using local PostgreSQL
-scripts/03-postgres-docker-access.sh optional PostgreSQL host access setup for Docker
 scripts/04-write-env-file.sh        writes .env from the configured environment variables
 ```
 
@@ -446,7 +443,7 @@ Normal users should run only:
 ./run-topomigrator.sh
 ```
 
-Use the helper scripts directly only when debugging or preparing a specific environment.
+Use the helper scripts directly only when debugging the wrapper or preparing `.env`.
 
 ## Running Without The Wrapper
 
@@ -509,11 +506,7 @@ Liquibase may not have run, or the target database/schema is not the one you exp
 
 `no pg_hba.conf entry`
 
-PostgreSQL is rejecting the Docker container connection. On Linux/WSL environments, try:
-
-```bash
-CONFIGURE_POSTGRES_DOCKER_ACCESS=true ./run-topomigrator.sh
-```
+PostgreSQL is rejecting the Docker container connection. Review your host PostgreSQL networking, authentication rules, and the connection values written to `.env`.
 
 `host.docker.internal` does not resolve
 

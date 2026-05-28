@@ -185,16 +185,7 @@ run_step \
 run_step \
   "Comprobar PostgreSQL" \
   "postgres_is_ready" \
-  "run_script '02-postgres-setup.sh'"
-
-if [[ "${CONFIGURE_POSTGRES_DOCKER_ACCESS:-false}" == "true" ]]; then
-  run_step \
-    "Configurar acceso PostgreSQL desde Docker" \
-    "false" \
-    "run_script '03-postgres-docker-access.sh'"
-else
-  log "SKIP: 03-postgres-docker-access.sh no se ejecuta automaticamente. Usa CONFIGURE_POSTGRES_DOCKER_ACCESS=true si lo necesitas."
-fi
+  "echo 'ERROR: PostgreSQL no esta listo o las credenciales configuradas no funcionan.'; echo 'Prepara manualmente las bases/usuarios y vuelve a ejecutar el runner.'; exit 1"
 
 run_step \
   "Generar .env con rutas del proyecto" \
