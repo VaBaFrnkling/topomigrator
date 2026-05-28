@@ -12,13 +12,12 @@ OUTPUTS_DIR="$ROOT_DIR/outputs"
 LOG_DIR="$OUTPUTS_DIR/logs"
 TRACE_DIR="$OUTPUTS_DIR/traces"
 STATE_DIR="$OUTPUTS_DIR/state"
-FLOW_DIR="$OUTPUTS_DIR/flows"
 ERROR_DIR="$OUTPUTS_DIR/errors"
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)"
 RUN_LOG="$LOG_DIR/run-topomigrator-$RUN_ID.log"
 
-mkdir -p "$LOG_DIR" "$TRACE_DIR" "$TRACE_DIR/tables" "$STATE_DIR" "$FLOW_DIR" "$ERROR_DIR"
+mkdir -p "$LOG_DIR" "$TRACE_DIR" "$TRACE_DIR/tables" "$STATE_DIR" "$ERROR_DIR"
 
 log() {
   printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" | tee -a "$RUN_LOG"
@@ -156,7 +155,7 @@ run_step \
 run_step \
   "Crear carpetas reales del proyecto" \
   "[[ -d '$CONFIG_DIR' && -d '$CHANGELOG_DIR' && -d '$LOG_DIR' && -d '$STATE_DIR' && -d '$TRACE_DIR/tables' ]]" \
-  "mkdir -p '$CONFIG_DIR' '$CHANGELOG_DIR' '$LOG_DIR' '$STATE_DIR' '$TRACE_DIR/tables' '$FLOW_DIR' '$ERROR_DIR'"
+  "mkdir -p '$CONFIG_DIR' '$CHANGELOG_DIR' '$LOG_DIR' '$STATE_DIR' '$TRACE_DIR/tables' '$ERROR_DIR'"
 
 run_step \
   "Validar .env" \

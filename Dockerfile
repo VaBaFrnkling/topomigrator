@@ -21,7 +21,6 @@ COPY flows ./flows
 COPY changelogs ./changelogs
 
 RUN mkdir -p outputs/errors \
-             outputs/flows \
              outputs/logs \
              outputs/traces \
              outputs/state

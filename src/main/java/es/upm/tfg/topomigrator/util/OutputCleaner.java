@@ -24,7 +24,6 @@ public class OutputCleaner {
         Path lastExecutionIdFile = normalizedRoot.resolve(Paths.get("traces", ".last_execution_id")).normalize();
         cleanDirectory(normalizedRoot, normalizedRoot.resolve("traces"), lastExecutionIdFile);
         cleanDirectory(normalizedRoot, normalizedRoot.resolve("errors"), lastExecutionIdFile);
-        cleanDirectory(normalizedRoot, normalizedRoot.resolve("flows"), lastExecutionIdFile);
     }
 
     private static void cleanDirectory(Path outputsRoot, Path directory, Path lastExecutionIdFile) {

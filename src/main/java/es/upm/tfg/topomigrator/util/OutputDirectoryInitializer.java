@@ -14,7 +14,6 @@ public final class OutputDirectoryInitializer {
             OUTPUTS_ROOT.resolve("errors"),
             OUTPUTS_ROOT.resolve("traces"),
             OUTPUTS_ROOT.resolve(Paths.get("traces", "tables")),
-            OUTPUTS_ROOT.resolve("flows"),
             OUTPUTS_ROOT.resolve("state")
     );
 
