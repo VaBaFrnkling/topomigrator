@@ -7,6 +7,7 @@ ENV_FILE="$ROOT_DIR/.env"
 
 CONFIG_DIR="$ROOT_DIR/configs"
 CHANGELOG_DIR="$ROOT_DIR/changelogs/tables"
+FLOW_TEMPLATE="$ROOT_DIR/flows/MainMigration.json"
 OUTPUTS_DIR="$ROOT_DIR/outputs"
 LOG_DIR="$OUTPUTS_DIR/logs"
 TRACE_DIR="$OUTPUTS_DIR/traces"
@@ -70,7 +71,7 @@ run_step() {
   log "==> $description"
 
   if eval "$check_command"; then
-    log "SKIP: $description ya estaba hecho."
+    log "OK: $description"
     return 0
   fi
 
@@ -111,6 +112,10 @@ has_changelogs() {
   find "$CHANGELOG_DIR" -maxdepth 1 -type f -name '*.yaml' -print -quit 2>/dev/null | grep -q .
 }
 
+has_flow_template() {
+  [[ -f "$FLOW_TEMPLATE" ]]
+}
+
 postgres_is_ready() {
   command -v psql >/dev/null 2>&1 &&
   postgres_jdbc_url_is_ready "$SOURCE_DB_JDBC_URL" "$SOURCE_DB_USERNAME" "$SOURCE_DB_PASSWORD" &&
@@ -127,6 +132,11 @@ postgres_jdbc_url_is_ready() {
   local host="${BASH_REMATCH[1]}"
   local port="${BASH_REMATCH[3]:-5432}"
   local database="${BASH_REMATCH[4]}"
+
+  if [[ "$host" == "host.docker.internal" ]]; then
+    log "AVISO: se omite la comprobacion con psql para $jdbc_url porque host.docker.internal puede no resolver en el host."
+    return 0
+  fi
 
   PGPASSWORD="$password" psql -h "$host" -p "$port" -U "$username" -d "$database" -c "SELECT 1;" >/dev/null 2>&1
 }
@@ -162,6 +172,11 @@ run_step \
   "Validar changelogs reales" \
   "has_changelogs" \
   "echo 'ERROR: changelogs/tables no contiene archivos .yaml'; exit 1"
+
+run_step \
+  "Validar plantilla base de NiFi" \
+  "has_flow_template" \
+  "echo 'ERROR: falta flows/MainMigration.json'; exit 1"
 
 run_step \
   "Comprobar PostgreSQL" \

@@ -26,6 +26,9 @@ run-topomigrator.sh
 1. Crea `.env` en la raiz del proyecto a partir de `.env.example`.
 2. Sustituye todos los valores de ejemplo por los reales de tu entorno.
 3. Verifica especialmente las JDBC URLs, usuarios y passwords.
+4. Usa en las JDBC URLs un host alcanzable desde donde corresponda:
+   `run-topomigrator.sh` prueba `psql` desde el host y `docker compose` conecta desde contenedores.
+   Si PostgreSQL corre en tu maquina con Docker Desktop, `host.docker.internal` suele servir dentro del contenedor.
 
 Variables obligatorias:
 
@@ -42,9 +45,10 @@ Valores fijos del proyecto:
 
 - `NIFI_BASE_URL=https://nifi:8443/nifi-api`
 - `NIFI_ALLOW_INSECURE_LOCAL_TLS=true`
-- `MIGRATION_CONFIG_PATH=/app/configs/contract.yaml`
-- `DATASOURCES_CONFIG_PATH=/app/configs/datasources.yaml`
-- `INCREMENTAL_STATE_PATH=/app/outputs/state/incremental-state.json`
+- `contract.yaml` se carga desde `configs/contract.yaml`
+- `datasources.yaml` se carga desde `configs/datasources.yaml`
+- El estado incremental se guarda en `outputs/state/incremental-state.json`
+- Los changelogs se leen desde `changelogs/tables`
 - Los drivers y tipos de base de datos se resuelven con defaults desde `configs/datasources.yaml`
 
 Ejemplo:
@@ -53,11 +57,11 @@ Ejemplo:
 NIFI_USERNAME=nifi_user
 NIFI_PASSWORD=change_this_password
 
-SOURCE_DB_JDBC_URL=jdbc:postgresql://host.docker.internal:5432/topomigrator_source
+SOURCE_DB_JDBC_URL=jdbc:postgresql://db-host-or-ip:5432/topomigrator_source
 SOURCE_DB_USERNAME=topomigrator_user
 SOURCE_DB_PASSWORD=change_this_source_password
 
-TARGET_DB_JDBC_URL=jdbc:postgresql://host.docker.internal:5432/topomigrator_target
+TARGET_DB_JDBC_URL=jdbc:postgresql://db-host-or-ip:5432/topomigrator_target
 TARGET_DB_USERNAME=topomigrator_user
 TARGET_DB_PASSWORD=change_this_target_password
 ```
@@ -73,6 +77,7 @@ El runner:
 - carga `.env` creado manualmente por el usuario
 - valida que todas las variables obligatorias esten definidas
 - valida `configs/` y `changelogs/`
+- valida `flows/MainMigration.json`
 - comprueba conectividad PostgreSQL con `psql`
 - ejecuta `docker compose up --build --abort-on-container-exit`
 

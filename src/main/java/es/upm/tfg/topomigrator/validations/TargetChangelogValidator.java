@@ -50,11 +50,7 @@ public class TargetChangelogValidator {
     }
 
     private static Path resolveChangelogsDir() {
-        String configuredDir = System.getenv("CHANGELOGS_DIR");
-        if (configuredDir == null || configuredDir.trim().isEmpty()) {
-            configuredDir = "changelogs/tables";
-        }
-        return Paths.get(configuredDir);
+        return Paths.get("changelogs", "tables");
     }
 
     private static void validateChangelogsDirectory(Path changelogsDir) {
