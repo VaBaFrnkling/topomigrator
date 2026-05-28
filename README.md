@@ -59,7 +59,7 @@ TARGET_DB_PASSWORD=change_this_target_password
 ## Ejecucion
 
 ```bash
-./run-topomigrator.sh
+bash run-topomigrator.sh
 ```
 
 El runner:
