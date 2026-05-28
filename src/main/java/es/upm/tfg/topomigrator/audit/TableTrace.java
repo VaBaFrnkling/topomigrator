@@ -10,6 +10,8 @@ public class TableTrace {
     public IncrementalInfo incrementalInfo;
     public String migrationType;
     public String status;
+    public String migrationStatus;
+    public CleanupInfo cleanup;
     public long recordsProcessed;
     public Timing timing;
     public Map<String, Object> filters;
@@ -31,6 +33,13 @@ public class TableTrace {
         public String previousValue;
         public String lastProcessedValue;
         public boolean stateUpdated;
+    }
+
+    public static class CleanupInfo {
+        public String status;
+        public String phase;
+        public String processGroupId;
+        public String message;
     }
 
     public static class AuditMetrics {

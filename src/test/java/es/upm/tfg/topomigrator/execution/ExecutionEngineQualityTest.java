@@ -46,7 +46,10 @@ public class ExecutionEngineQualityTest {
         assertEquals(20L, traces.tableTraces.get(0).recordsProcessed);
         assertFalse("Las trazas individuales no deben exponer executionOrder",
                 List.of(TableTrace.class.getDeclaredFields()).stream().anyMatch(field -> field.getName().equals("executionOrder")));
-        assertTrue(nifi.uploadedGroups.contains("Migracion_customers"));
+        assertEquals(1, nifi.uploadedGroups.size());
+        assertTrue(nifi.uploadedGroups.get(0).contains(traces.summary.executionId));
+        assertTrue(nifi.uploadedGroups.get(0).contains("Migracion_customers"));
+        assertEquals(List.of(nifi.uploadedGroups.get(0) + "-id"), nifi.readinessValidatedGroups);
     }
 
     @Test
@@ -76,7 +79,8 @@ public class ExecutionEngineQualityTest {
         assertEquals(1, traces.summary.tables.blocked);
         assertEquals("FAILED", traces.tableTraces.get(0).status);
         assertEquals("BLOCKED", traces.tableTraces.get(1).status);
-        assertEquals(List.of("Migracion_customers"), nifi.uploadedGroups);
+        assertEquals(1, nifi.uploadedGroups.size());
+        assertTrue(nifi.uploadedGroups.get(0).contains("Migracion_customers"));
         assertEquals(List.of("NIFI_TABLE_EXECUTION:public.customers:RuntimeException"), harness.errors.tableErrors);
         assertEquals(List.of(), harness.errors.executionErrors);
     }
@@ -98,13 +102,82 @@ public class ExecutionEngineQualityTest {
         assertEquals(1, traces.summary.tables.successful);
         assertEquals(0, traces.summary.tables.blocked);
         assertEquals("SUCCESS", traces.tableTraces.get(0).status);
-        assertEquals(List.of("Migracion_employees"), nifi.uploadedGroups);
+        assertEquals(1, nifi.uploadedGroups.size());
+        assertTrue(nifi.uploadedGroups.get(0).contains("Migracion_employees"));
     }
 
     @Test
-    public void executeMigrationFailsWhenProcessGroupCleanupFailsAfterSuccessfulLoad() throws Exception {
+    public void executeMigrationKeepsFunctionalSuccessWhenProcessGroupCleanupFails() throws Exception {
         RecordingNiFiClient nifi = new RecordingNiFiClient();
         nifi.failCleanup = true;
+        RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
+        CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 20L)));
+        EngineHarness harness = engine(nifi, traces, metrics);
+        MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
+
+        harness.engine.executeMigration(List.of(new TableNode("customers")), contract, List.of());
+
+        assertEquals(1, traces.summary.tables.successful);
+        assertEquals(0, traces.summary.tables.failed);
+        assertEquals("SUCCESS", traces.tableTraces.get(0).status);
+        assertEquals("SUCCESS", traces.tableTraces.get(0).migrationStatus);
+        assertEquals(20L, traces.tableTraces.get(0).recordsProcessed);
+        assertEquals("FAILED", traces.tableTraces.get(0).cleanup.status);
+        assertTrue(traces.tableTraces.get(0).cleanup.processGroupId.contains("Migracion_customers"));
+        assertTrue(traces.tableTraces.get(0).cleanup.message.contains("Fallo operacional de cleanup"));
+        assertTrue(traces.tableTraces.get(0).auditMetrics.warnings.stream()
+                .anyMatch(warning -> warning.contains("Fallo operacional de cleanup")));
+    }
+
+    @Test
+    public void executeMigrationDoesNotBlockDependentsWhenParentCleanupFails() throws Exception {
+        RecordingNiFiClient nifi = new RecordingNiFiClient();
+        nifi.failCleanup = true;
+        RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
+        CountingMetricsService metrics = new CountingMetricsService(
+                Map.of("customers", 5L, "orders", 7L),
+                Map.of("customers", List.of(0L, 5L), "orders", List.of(0L, 7L))
+        );
+        EngineHarness harness = engine(nifi, traces, metrics);
+        MigrationContract contract = QualityTestData.contractWith(
+                QualityTestData.fullTable("customers"),
+                QualityTestData.fullTable("orders")
+        );
+
+        harness.engine.executeMigration(
+                List.of(new TableNode("customers"), new TableNode("orders")),
+                contract,
+                List.of(new ForeignKeyDependency("customers", "orders"))
+        );
+
+        assertEquals(2, traces.summary.tables.successful);
+        assertEquals(0, traces.summary.tables.blocked);
+        assertEquals("SUCCESS", traces.tableTraces.get(0).status);
+        assertEquals("FAILED", traces.tableTraces.get(0).cleanup.status);
+        assertEquals("SUCCESS", traces.tableTraces.get(1).status);
+    }
+
+    @Test
+    public void executeMigrationContinuesWhenStaleProcessGroupsCannotBeCleaned() throws Exception {
+        RecordingNiFiClient nifi = new RecordingNiFiClient();
+        nifi.failStaleCleanup = true;
+        RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
+        CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 20L)));
+        EngineHarness harness = engine(nifi, traces, metrics);
+        MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
+
+        harness.engine.executeMigration(List.of(new TableNode("customers")), contract, List.of());
+
+        assertEquals(1, traces.summary.tables.successful);
+        assertEquals(1, nifi.staleCleanupWarnings.size());
+        assertTrue(nifi.staleCleanupWarnings.get(0).contains("stale NiFi state could not be cleaned"));
+        assertEquals(List.of(), harness.errors.executionErrors);
+    }
+
+    @Test
+    public void executeMigrationFailsWhenNiFiOperationalReadinessValidationFails() throws Exception {
+        RecordingNiFiClient nifi = new RecordingNiFiClient();
+        nifi.failOperationalReadiness = true;
         RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
         CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 20L)));
         EngineHarness harness = engine(nifi, traces, metrics);
@@ -115,24 +188,24 @@ public class ExecutionEngineQualityTest {
 
         assertTrue(error.getMessage().contains("tabla(s) fallida(s)"));
         assertEquals("FAILED", traces.tableTraces.get(0).status);
-        assertTrue(traces.tableTraces.get(0).errors.get(0).contains("No se pudo limpiar"));
+        assertTrue(traces.tableTraces.get(0).errors.get(0).contains("Controller Services no operativos"));
     }
 
     @Test
-    public void executeMigrationFailsBeforeUploadingWhenStaleProcessGroupsCannotBeCleaned() throws Exception {
+    public void executeMigrationFailsWhenAuditCountersMismatch() throws Exception {
         RecordingNiFiClient nifi = new RecordingNiFiClient();
-        nifi.failStaleCleanup = true;
         RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
-        CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 20L)));
+        CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 12L)));
         EngineHarness harness = engine(nifi, traces, metrics);
         MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> harness.engine.executeMigration(List.of(new TableNode("customers")), contract, List.of()));
 
-        assertTrue(error.getMessage().contains("Fallo crítico general"));
-        assertEquals(List.of(), nifi.uploadedGroups);
-        assertEquals(List.of("NIFI_EXECUTION:RuntimeException"), harness.errors.executionErrors);
+        assertTrue(error.getMessage().contains("tabla(s) fallida(s)"));
+        assertEquals("FAILED", traces.tableTraces.get(0).status);
+        assertEquals("MISMATCH", traces.tableTraces.get(0).auditMetrics.consistencyStatus);
+        assertTrue(traces.tableTraces.get(0).errors.get(0).contains("inconsistencia"));
     }
 
     private EngineHarness engine(RecordingNiFiClient nifi, RecordingTraceabilityManager traces, CountingMetricsService metrics) throws Exception {
@@ -182,9 +255,12 @@ public class ExecutionEngineQualityTest {
 
     private static final class RecordingNiFiClient extends NiFiClient {
         private final List<String> uploadedGroups = new ArrayList<>();
+        private final List<String> readinessValidatedGroups = new ArrayList<>();
+        private final List<String> staleCleanupWarnings = new ArrayList<>();
         private String failUploadsForTable;
         private boolean failCleanup;
         private boolean failStaleCleanup;
+        private boolean failOperationalReadiness;
 
         private RecordingNiFiClient() {
             super("https://nifi.invalid/nifi-api", "user", "password", false);
@@ -202,14 +278,14 @@ public class ExecutionEngineQualityTest {
         @Override
         public void cleanupStaleTopomigratorProcessGroups(String rootProcessGroupId) {
             if (failStaleCleanup) {
-                throw new RuntimeException("stale NiFi state could not be cleaned");
+                staleCleanupWarnings.add("stale NiFi state could not be cleaned");
             }
         }
 
         @Override
         public String uploadFlowDefinition(String parentId, String groupName, int positionY, Path flowJsonPath, Map<String, String> dynamicVariables) {
             uploadedGroups.add(groupName);
-            if (groupName.equals("Migracion_" + failUploadsForTable)) {
+            if (groupName.contains("Migracion_" + failUploadsForTable)) {
                 throw new RuntimeException("Simulated NiFi upload failure for " + groupName);
             }
             return groupName + "-id";
@@ -217,6 +293,14 @@ public class ExecutionEngineQualityTest {
 
         @Override
         public void enableControllerServicesRecursively(String processGroupId) {
+        }
+
+        @Override
+        public void validateProcessGroupOperationalReadiness(String processGroupId) {
+            readinessValidatedGroups.add(processGroupId);
+            if (failOperationalReadiness) {
+                throw new RuntimeException("Controller Services no operativos");
+            }
         }
 
         @Override

@@ -40,6 +40,11 @@ public class ExecutionEngine {
     static final String STATUS_FAILED = "FAILED";
     static final String STATUS_BLOCKED = "BLOCKED";
     static final String STATUS_PENDING = "PENDING";
+    static final String CLEANUP_STATUS_PENDING = "PENDING";
+    static final String CLEANUP_STATUS_SUCCESS = "SUCCESS";
+    static final String CLEANUP_STATUS_FAILED = "FAILED";
+    static final String CLEANUP_STATUS_SKIPPED = "SKIPPED";
+    static final String CLEANUP_PHASE_PROCESS_GROUP = "PROCESS_GROUP_CLEANUP";
 
     private static final String CONSISTENCY_MATCH = "MATCH";
     private static final String CONSISTENCY_MISMATCH = "MISMATCH";
@@ -203,7 +208,7 @@ public class ExecutionEngine {
                         ensureCanonicalFinalStatus(tableTrace);
                     } catch (IllegalStateException invariantEx) {
                         logger.error("Invariante de estado roto para tabla {}: {}. Se fuerza FAILED.", tableName, invariantEx.getMessage());
-                        tableTrace.status = STATUS_FAILED;
+                        setMigrationStatus(tableTrace, STATUS_FAILED);
                         if (tableTrace.errors == null) {
                             tableTrace.errors = new ArrayList<>();
                         }
@@ -258,13 +263,15 @@ public class ExecutionEngine {
         nifiClient.authenticate();
 
         Map<String, String> flowConfigVariables = buildFlowVariables(executionId, contract, tableConfig, tableTrace, effectiveIncrementalStartValue);
-        String groupName = "Migracion_" + tableName;
+        String groupName = buildExecutionScopedGroupName(executionId, tableName);
         String pgId = null;
         Exception operationFailure = null;
 
         try {
             pgId = nifiClient.uploadFlowDefinition(rootId, groupName, yOffset, flowPath, flowConfigVariables);
+            tableTrace.cleanup.processGroupId = pgId;
             nifiClient.enableControllerServicesRecursively(pgId);
+            nifiClient.validateProcessGroupOperationalReadiness(pgId);
             nifiClient.changeProcessGroupState(pgId, "RUNNING");
 
             monitorFlowUntilCompletion(pgId, tableName);
@@ -277,7 +284,7 @@ public class ExecutionEngine {
             tableTrace.recordsProcessed = resolveAuditedProcessedRecords(sourceSelectedRows, tableTrace.auditMetrics.targetNetDelta, tableTrace);
 
             updateIncrementalStateIfNeeded(contract, tableName, tableConfig, effectiveIncrementalStartValue, tableTrace);
-            tableTrace.status = STATUS_SUCCESS;
+            setMigrationStatus(tableTrace, STATUS_SUCCESS);
             logger.info("Tabla {} migrada correctamente. Registros auditados: {}", tableName, tableTrace.recordsProcessed);
         } catch (Exception e) {
             operationFailure = e;
@@ -286,14 +293,24 @@ public class ExecutionEngine {
             if (pgId != null) {
                 try {
                     nifiClient.cleanupProcessGroup(pgId);
+                    markCleanupResult(tableTrace, CLEANUP_STATUS_SUCCESS, CLEANUP_PHASE_PROCESS_GROUP, pgId, "Process Group temporal eliminado correctamente.");
                 } catch (Exception cleanupEx) {
                     if (operationFailure != null) {
                         operationFailure.addSuppressed(cleanupEx);
+                        markCleanupResult(tableTrace, CLEANUP_STATUS_FAILED, CLEANUP_PHASE_PROCESS_GROUP, pgId,
+                                "Fallo operacional de cleanup tras un error funcional previo: " + sanitizeDiagnostic(cleanupEx.getMessage()));
                     } else {
-                        throw new NiFiFlowFailureException("No se pudo limpiar de forma segura el Process Group "
-                                + pgId + " tras migrar " + tableName + ". La ejecucion se marca como fallida para evitar residuos NiFi.", cleanupEx);
+                        String cleanupMessage = "Fallo operacional de cleanup tras una migracion funcionalmente correcta. "
+                                + "Process Group=" + pgId + ", fase=" + CLEANUP_PHASE_PROCESS_GROUP
+                                + ", causa=" + sanitizeDiagnostic(cleanupEx.getMessage());
+                        logger.warn("{}", cleanupMessage, cleanupEx);
+                        markCleanupResult(tableTrace, CLEANUP_STATUS_FAILED, CLEANUP_PHASE_PROCESS_GROUP, pgId, cleanupMessage);
+                        tableTrace.auditMetrics.warnings.add(cleanupMessage);
                     }
                 }
+            } else if (CLEANUP_STATUS_PENDING.equals(tableTrace.cleanup.status)) {
+                markCleanupResult(tableTrace, CLEANUP_STATUS_SKIPPED, CLEANUP_PHASE_PROCESS_GROUP, null,
+                        "No se creó Process Group temporal para esta tabla.");
             }
         }
     }
@@ -566,9 +583,32 @@ public class ExecutionEngine {
         return fallbackName;
     }
 
+    private String buildExecutionScopedGroupName(String executionId, String tableName) {
+        return "tm-" + executionId + "__Migracion_" + tableName;
+    }
+
+    private void setMigrationStatus(TableTrace tableTrace, String status) {
+        tableTrace.status = status;
+        tableTrace.migrationStatus = status;
+    }
+
+    private void markCleanupResult(TableTrace tableTrace,
+                                   String cleanupStatus,
+                                   String cleanupPhase,
+                                   String processGroupId,
+                                   String message) {
+        if (tableTrace.cleanup == null) {
+            tableTrace.cleanup = new TableTrace.CleanupInfo();
+        }
+        tableTrace.cleanup.status = cleanupStatus;
+        tableTrace.cleanup.phase = cleanupPhase;
+        tableTrace.cleanup.processGroupId = processGroupId;
+        tableTrace.cleanup.message = message;
+    }
+
     private void markTableAsBlocked(SummaryTrace summary, TableTrace tableTrace, String tableName, List<String> blockingParents) {
         logger.warn("Tabla {} bloqueada porque una o más tablas padre no terminaron correctamente: {}", tableName, blockingParents);
-        tableTrace.status = STATUS_BLOCKED;
+        setMigrationStatus(tableTrace, STATUS_BLOCKED);
         tableTrace.recordsProcessed = 0L;
         tableTrace.auditMetrics.consistencyStatus = STATUS_BLOCKED;
         tableTrace.auditMetrics.warnings.add("Tabla no ejecutada por fallo previo en dependencias padre: " + blockingParents);
@@ -578,14 +618,16 @@ public class ExecutionEngine {
 
     private void markTableAsFailed(SummaryTrace summary, TableTrace tableTrace, String tableName, Exception e) {
         String sanitizedMessage = sanitizeDiagnostic(e != null ? e.getMessage() : null);
-        tableTrace.status = STATUS_FAILED;
+        setMigrationStatus(tableTrace, STATUS_FAILED);
         tableTrace.recordsProcessed = 0L;
         if (tableTrace.errors == null) {
             tableTrace.errors = new ArrayList<>();
         }
         tableTrace.errors.add(sanitizedMessage);
         if (tableTrace.auditMetrics != null) {
-            tableTrace.auditMetrics.consistencyStatus = STATUS_FAILED;
+            if (tableTrace.auditMetrics.consistencyStatus == null) {
+                tableTrace.auditMetrics.consistencyStatus = STATUS_FAILED;
+            }
             tableTrace.auditMetrics.warnings.add("La tabla falló durante la ejecución: " + sanitizedMessage);
         }
         summary.tables.failed++;
@@ -612,8 +654,10 @@ public class ExecutionEngine {
         tableTrace.auditMetrics = new TableTrace.AuditMetrics();
         tableTrace.auditMetrics.strategy = "SOURCE_QUERY_COUNT_WITH_TARGET_DELTA_VALIDATION";
         tableTrace.auditMetrics.warnings = new ArrayList<>();
+        tableTrace.cleanup = new TableTrace.CleanupInfo();
+        tableTrace.cleanup.status = CLEANUP_STATUS_PENDING;
         tableTrace.errors = new ArrayList<>();
-        tableTrace.status = STATUS_PENDING;
+        setMigrationStatus(tableTrace, STATUS_PENDING);
 
         if (tableConfig != null) {
             tableTrace.migrationType = tableConfig.getMigrationType();
@@ -640,6 +684,10 @@ public class ExecutionEngine {
         s.executionId = tableTrace.tableExecutionId;
         s.order = executionOrder;
         s.status = tableTrace.status;
+        s.migrationStatus = tableTrace.migrationStatus;
+        s.cleanupStatus = tableTrace.cleanup != null ? tableTrace.cleanup.status : null;
+        s.cleanupProcessGroupId = tableTrace.cleanup != null ? tableTrace.cleanup.processGroupId : null;
+        s.cleanupMessage = tableTrace.cleanup != null ? tableTrace.cleanup.message : null;
         s.records = tableTrace.recordsProcessed;
         s.durationMs = tableTrace.timing.durationMs;
         s.sourceSelectedRecords = tableTrace.auditMetrics != null ? tableTrace.auditMetrics.sourceSelectedRecords : null;
@@ -694,6 +742,11 @@ public class ExecutionEngine {
 
     private long resolveAuditedProcessedRecords(Long sourceSelectedRows, Long targetNetDelta, TableTrace tableTrace) {
         finalizeAuditConsistency(tableTrace, sourceSelectedRows, targetNetDelta);
+
+        if (tableTrace.auditMetrics != null && CONSISTENCY_MISMATCH.equals(tableTrace.auditMetrics.consistencyStatus)) {
+            throw new IllegalStateException("La auditoria detecto inconsistencia entre origen y destino. "
+                    + "sourceSelectedRecords=" + sourceSelectedRows + ", targetNetDelta=" + targetNetDelta);
+        }
 
         if (sourceSelectedRows != null) {
             return sourceSelectedRows;

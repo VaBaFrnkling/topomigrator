@@ -35,6 +35,9 @@ import com.google.gson.JsonParser;
 public class NiFiClient {
 
     private static final Logger logger = LoggerFactory.getLogger(NiFiClient.class);
+    private static final String EXECUTION_GROUP_PREFIX = "tm-exec-";
+    private static final String LEGACY_GROUP_PREFIX = "Migracion_";
+    private static final String QUARANTINE_GROUP_PREFIX = "QUARANTINE_";
     
     private final String baseUrl;
     private final String username;
@@ -463,9 +466,13 @@ public class NiFiClient {
      * 4) borrar el Process Group.
      */
     public void cleanupProcessGroup(String processGroupId) throws Exception {
+        cleanupProcessGroupStrict(processGroupId);
+    }
+
+    void cleanupProcessGroupStrict(String processGroupId) throws Exception {
         ensureAuthenticated();
 
-        logger.info("Iniciando limpieza del Process Group temporal {} en NiFi.", processGroupId);
+        logger.info("Iniciando limpieza estricta del Process Group {} en NiFi.", processGroupId);
 
         changeProcessGroupState(processGroupId, "STOPPED");
         waitForProcessGroupStopped(processGroupId);
@@ -479,18 +486,94 @@ public class NiFiClient {
     public void cleanupStaleTopomigratorProcessGroups(String rootProcessGroupId) throws Exception {
         ensureAuthenticated();
 
-        List<ProcessGroupRef> staleGroups = collectTopomigratorProcessGroups(rootProcessGroupId);
+        List<ProcessGroupRef> staleGroups = findTopomigratorResidualProcessGroups(rootProcessGroupId);
         if (staleGroups.isEmpty()) {
             logger.info("No hay Process Groups residuales de TopoMigrator en NiFi.");
             return;
         }
 
-        logger.warn("Detectados {} Process Groups residuales de TopoMigrator. Se limpiaran antes de iniciar una nueva ejecucion.",
+        logger.warn("Detectados {} Process Groups residuales de TopoMigrator. Se aplicara limpieza best-effort antes de iniciar una nueva ejecucion.",
                 staleGroups.size());
         for (ProcessGroupRef group : staleGroups) {
-            logger.warn("Limpiando Process Group residual {} ({})", group.name, group.id);
-            cleanupProcessGroup(group.id);
+            cleanupResidualProcessGroupBestEffort(group);
         }
+    }
+
+    List<ProcessGroupRef> findTopomigratorResidualProcessGroups(String rootProcessGroupId) throws Exception {
+        return collectTopomigratorProcessGroups(rootProcessGroupId);
+    }
+
+    void cleanupResidualProcessGroupBestEffort(ProcessGroupRef group) {
+        logger.warn("Intentando limpiar Process Group residual {} ({}) con modo best-effort.", group.name, group.id);
+        try {
+            cleanupProcessGroupStrict(group.id);
+            logger.info("Process Group residual {} ({}) eliminado correctamente.", group.name, group.id);
+        } catch (Exception cleanupError) {
+            logger.warn("No se pudo limpiar el Process Group residual {} ({}). Se continuara con la nueva ejecucion. Diagnostico: {}",
+                    group.name,
+                    group.id,
+                    describeResidualProcessGroup(group),
+                    cleanupError);
+            String quarantinedName = quarantineResidualProcessGroupBestEffort(group, cleanupError);
+            if (quarantinedName != null) {
+                logger.warn("Process Group residual {} ({}) marcado en cuarentena como {}.",
+                        group.name, group.id, quarantinedName);
+            } else {
+                logger.warn("No se pudo marcar en cuarentena el Process Group residual {} ({}). Queda pendiente de limpieza manual.",
+                        group.name, group.id);
+            }
+        }
+    }
+
+    String quarantineResidualProcessGroupBestEffort(ProcessGroupRef group, Exception cleanupError) {
+        try {
+            try {
+                changeProcessGroupState(group.id, "STOPPED");
+            } catch (Exception stopError) {
+                logger.warn("No se pudo detener el Process Group residual {} ({}) antes de marcarlo en cuarentena: {}",
+                        group.name, group.id, stopError.getMessage());
+            }
+
+            String quarantineName = buildQuarantineGroupName(group.name);
+            renameProcessGroup(group.id, quarantineName);
+            return quarantineName;
+        } catch (Exception quarantineError) {
+            logger.warn("No se pudo marcar en cuarentena el Process Group residual {} ({}): {}",
+                    group.name, group.id, quarantineError.getMessage(), quarantineError);
+            return null;
+        }
+    }
+
+    String describeResidualProcessGroup(ProcessGroupRef group) {
+        List<String> diagnostics = new ArrayList<>();
+        diagnostics.add("groupId=" + group.id);
+        diagnostics.add("groupName=" + group.name);
+
+        try {
+            JsonObject status = getProcessGroupStatus(group.id, true);
+            JsonObject processGroupStatus = getObject(status, "processGroupStatus");
+            JsonObject snapshot = getObject(processGroupStatus, "aggregateSnapshot");
+            if (snapshot != null) {
+                diagnostics.add("activeThreads=" + firstNonBlank(getString(snapshot, "activeThreadCount"), "unknown"));
+                diagnostics.add("queued=" + firstNonBlank(getString(snapshot, "queuedCount"), "unknown"));
+                diagnostics.add("bytesRead=" + firstNonBlank(getString(snapshot, "bytesRead"), "unknown"));
+            }
+        } catch (Exception statusError) {
+            diagnostics.add("statusError=" + statusError.getMessage());
+        }
+
+        try {
+            List<ControllerServiceRef> services = collectControllerServices(group.id, new LinkedHashSet<>());
+            long pendingServices = services.stream()
+                    .filter(service -> !"ENABLED".equalsIgnoreCase(service.state) && !"DISABLED".equalsIgnoreCase(service.state))
+                    .count();
+            diagnostics.add("controllerServices=" + services.size());
+            diagnostics.add("controllerServicesPending=" + pendingServices);
+        } catch (Exception serviceError) {
+            diagnostics.add("controllerServicesError=" + serviceError.getMessage());
+        }
+
+        return String.join(", ", diagnostics);
     }
 
     public JsonObject getProcessGroup(String processGroupId) throws Exception {
@@ -564,12 +647,33 @@ public class NiFiClient {
             if (childId == null || childId.isBlank()) {
                 continue;
             }
-            if (name != null && name.startsWith("Migracion_")) {
+            if (isTopomigratorManagedGroup(name)) {
                 result.add(new ProcessGroupRef(childId, name));
                 continue;
             }
             collectTopomigratorProcessGroups(childId, result, visitedGroups);
         }
+    }
+
+    public void validateProcessGroupOperationalReadiness(String processGroupId) throws Exception {
+        ensureAuthenticated();
+
+        getProcessGroupStatus(processGroupId, true);
+
+        List<ControllerServiceRef> services = collectControllerServices(processGroupId, new LinkedHashSet<>());
+        List<String> notEnabled = new ArrayList<>();
+        for (ControllerServiceRef service : services) {
+            if (!"ENABLED".equalsIgnoreCase(service.state)) {
+                notEnabled.add(service.name + " (" + service.id + ") estado=" + service.state);
+            }
+        }
+        if (!notEnabled.isEmpty()) {
+            throw new RuntimeException("NiFi no esta listo para ejecutar el Process Group "
+                    + processGroupId + ". Controller Services no operativos: " + notEnabled);
+        }
+
+        logger.info("NiFi listo para ejecutar el Process Group {}. Controller Services verificados: {}.",
+                processGroupId, services.size());
     }
 
     private void waitForProcessGroupStopped(String processGroupId) throws Exception {
@@ -938,10 +1042,74 @@ public class NiFiClient {
         }
     }
 
-    private void ensureAuthenticated() {
+    private void renameProcessGroup(String processGroupId, String newName) throws Exception {
+        JsonObject processGroupEntity = getProcessGroup(processGroupId);
+        JsonObject revision = getObject(processGroupEntity, "revision");
+        JsonObject component = getObject(processGroupEntity, "component");
+
+        if (component == null) {
+            throw new RuntimeException("NiFi no devolvio el componente del Process Group " + processGroupId);
+        }
+
+        long version = revision != null && revision.has("version") && !revision.get("version").isJsonNull()
+                ? revision.get("version").getAsLong()
+                : 0L;
+        String clientId = revision != null && revision.has("clientId") && !revision.get("clientId").isJsonNull()
+                ? revision.get("clientId").getAsString()
+                : "topomigrator-" + UUID.randomUUID();
+
+        JsonObject payload = new JsonObject();
+        JsonObject payloadRevision = new JsonObject();
+        payloadRevision.addProperty("clientId", clientId);
+        payloadRevision.addProperty("version", version);
+        payload.add("revision", payloadRevision);
+
+        JsonObject payloadComponent = new JsonObject();
+        payloadComponent.addProperty("id", processGroupId);
+        payloadComponent.addProperty("name", newName);
+        JsonObject position = getObject(component, "position");
+        if (position != null) {
+            JsonObject payloadPosition = new JsonObject();
+            if (position.has("x") && !position.get("x").isJsonNull()) {
+                payloadPosition.addProperty("x", position.get("x").getAsDouble());
+            }
+            if (position.has("y") && !position.get("y").isJsonNull()) {
+                payloadPosition.addProperty("y", position.get("y").getAsDouble());
+            }
+            payloadComponent.add("position", payloadPosition);
+        }
+        payload.add("component", payloadComponent);
+        payload.addProperty("disconnectedNodeAcknowledged", false);
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/process-groups/" + processGroupId))
+                .header("Authorization", "Bearer " + jwtToken)
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(payload.toString()))
+                .build();
+
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            logger.error("No se pudo renombrar el Process Group {} a {}. HTTP {} - {}",
+                    processGroupId, newName, response.statusCode(), response.body());
+            throw new RuntimeException("Error renombrando Process Group " + processGroupId + ": " + response.statusCode());
+        }
+    }
+
+    protected void ensureAuthenticated() {
         if (jwtToken == null) {
             throw new IllegalStateException("Cliente no autenticado. Llamar a authenticate() primero.");
         }
+    }
+
+    private boolean isTopomigratorManagedGroup(String groupName) {
+        return groupName != null
+                && (groupName.startsWith(EXECUTION_GROUP_PREFIX) || groupName.startsWith(LEGACY_GROUP_PREFIX));
+    }
+
+    private String buildQuarantineGroupName(String originalName) {
+        String baseName = originalName == null || originalName.isBlank() ? "unnamed" : originalName;
+        return QUARANTINE_GROUP_PREFIX + baseName;
     }
 
     private JsonObject getObject(JsonObject parent, String key) {
@@ -994,11 +1162,11 @@ public class NiFiClient {
         }
     }
 
-    private static final class ProcessGroupRef {
-        private final String id;
-        private final String name;
+    static final class ProcessGroupRef {
+        final String id;
+        final String name;
 
-        private ProcessGroupRef(String id, String name) {
+        ProcessGroupRef(String id, String name) {
             this.id = id;
             this.name = name;
         }
