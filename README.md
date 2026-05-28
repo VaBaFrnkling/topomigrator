@@ -41,16 +41,6 @@ Variables obligatorias:
 - `TARGET_DB_USERNAME`
 - `TARGET_DB_PASSWORD`
 
-Valores fijos del proyecto:
-
-- `NIFI_BASE_URL=https://nifi:8443/nifi-api`
-- `NIFI_ALLOW_INSECURE_LOCAL_TLS=true`
-- `contract.yaml` se carga desde `configs/contract.yaml`
-- `datasources.yaml` se carga desde `configs/datasources.yaml`
-- El estado incremental se guarda en `outputs/state/incremental-state.json`
-- Los changelogs se leen desde `changelogs/tables`
-- Los drivers y tipos de base de datos se resuelven con defaults desde `configs/datasources.yaml`
-
 Ejemplo:
 
 ```dotenv
