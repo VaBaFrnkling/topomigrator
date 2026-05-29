@@ -12,7 +12,7 @@
       {
         "identifier": "aef7e379-b403-3d6f-9e10-00f12816effe",
         "instanceIdentifier": "8733281a-019d-1000-5acd-97cd3ab9c0c1",
-        "name": "Full",
+        "name": "MigrationPipeline",
         "parameterContextName": "migration-db-context",
         "comments": "Pipeline único parametrizado desde Java; elimina la dependencia de EvaluateJsonPath y el branching full/incremental.",
         "position": {
@@ -846,7 +846,7 @@
           {
             "identifier": "b0061cc4-c688-3cf5-aa2e-3f5af92b3999",
             "instanceIdentifier": "8c71b8d3-019d-1000-422d-424f602a98d0",
-            "name": "in_full",
+            "name": "in_migration",
             "position": {
               "x": -704.0,
               "y": -304.0
@@ -870,7 +870,7 @@
               "id": "b0061cc4-c688-3cf5-aa2e-3f5af92b3999",
               "type": "INPUT_PORT",
               "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-              "name": "in_full",
+              "name": "in_migration",
               "instanceIdentifier": "8c71b8d3-019d-1000-422d-424f602a98d0"
             },
             "destination": {
@@ -1157,7 +1157,7 @@
           "id": "b0061cc4-c688-3cf5-aa2e-3f5af92b3999",
           "type": "INPUT_PORT",
           "groupId": "aef7e379-b403-3d6f-9e10-00f12816effe",
-          "name": "in_full",
+          "name": "in_migration",
           "instanceIdentifier": "8c71b8d3-019d-1000-422d-424f602a98d0"
         },
         "labelIndex": 0,
