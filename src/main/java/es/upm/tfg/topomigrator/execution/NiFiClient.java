@@ -38,6 +38,8 @@ public class NiFiClient {
     private static final String EXECUTION_GROUP_PREFIX = "tm-exec-";
     private static final String LEGACY_GROUP_PREFIX = "Migracion_";
     private static final String QUARANTINE_GROUP_PREFIX = "QUARANTINE_";
+    private static final int AUTH_MAX_ATTEMPTS = 30;
+    private static final long AUTH_RETRY_WAIT_MS = 2000L;
     
     private final String baseUrl;
     private final String username;
@@ -128,22 +130,46 @@ public class NiFiClient {
         String formBody = "username=" + URLEncoder.encode(username, StandardCharsets.UTF_8)
                 + "&password=" + URLEncoder.encode(password, StandardCharsets.UTF_8);
 
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl + "/access/token"))
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .header("Accept", "text/plain")
-                .POST(HttpRequest.BodyPublishers.ofString(formBody))
-                .build();
+        Exception lastError = null;
+        for (int attempt = 1; attempt <= AUTH_MAX_ATTEMPTS; attempt++) {
+            try {
+                HttpRequest request = HttpRequest.newBuilder()
+                        .uri(URI.create(baseUrl + "/access/token"))
+                        .header("Content-Type", "application/x-www-form-urlencoded")
+                        .header("Accept", "text/plain")
+                        .POST(HttpRequest.BodyPublishers.ofString(formBody))
+                        .build();
 
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        
-        if (response.statusCode() == 201 || response.statusCode() == 200) {
-            this.jwtToken = response.body();
-            logger.info("Autenticación correcta en NiFi API. Token JWT obtenido con éxito.");
-        } else {
-            logger.error("Fallo la autenticación contra NiFi. Status: {}, Body: {}", response.statusCode(), response.body());
-            throw new RuntimeException("No se pudo iniciar sesión en NiFi. Status: " + response.statusCode());
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+                if (response.statusCode() == 201 || response.statusCode() == 200) {
+                    this.jwtToken = response.body();
+                    logger.info("Autenticación correcta en NiFi API. Token JWT obtenido con éxito.");
+                    return;
+                }
+
+                if (response.statusCode() == 401 || response.statusCode() == 403) {
+                    logger.error("Fallo la autenticación contra NiFi. Status: {}, Body: {}", response.statusCode(), response.body());
+                    throw new IllegalStateException("No se pudo iniciar sesión en NiFi. Status: " + response.statusCode());
+                }
+
+                lastError = new RuntimeException("NiFi todavía no acepta autenticación. Status: "
+                        + response.statusCode() + ", Body: " + response.body());
+            } catch (IllegalStateException e) {
+                throw e;
+            } catch (Exception e) {
+                lastError = e;
+            }
+
+            if (attempt < AUTH_MAX_ATTEMPTS) {
+                logger.warn("NiFi no está listo para autenticar todavía (intento {}/{}): {}",
+                        attempt, AUTH_MAX_ATTEMPTS, lastError.getMessage());
+                Thread.sleep(AUTH_RETRY_WAIT_MS);
+            }
         }
+
+        throw new RuntimeException("No se pudo iniciar sesión en NiFi tras "
+                + AUTH_MAX_ATTEMPTS + " intentos.", lastError);
     }
 
     /**
@@ -690,12 +716,16 @@ public class NiFiClient {
     }
 
     private void assertNoQueuedFlowFiles(String processGroupId) throws Exception {
-        JsonObject status = getProcessGroupStatus(processGroupId, true);
-        long queued = sumMetric(status, "queuedCount", "flowFilesQueued");
+        long queued = countQueuedFlowFiles(processGroupId);
         if (queued > 0) {
             throw new RuntimeException("El Process Group " + processGroupId
                     + " conserva " + queued + " FlowFile(s) en cola tras intentar vaciarlo.");
         }
+    }
+
+    private long countQueuedFlowFiles(String processGroupId) throws Exception {
+        JsonObject status = getProcessGroupStatus(processGroupId, true);
+        return sumMetric(status, "queuedCount", "flowFilesQueued");
     }
 
     public JsonObject getControllerService(String controllerServiceId) throws Exception {
@@ -920,6 +950,11 @@ public class NiFiClient {
     }
 
     private void emptyAllConnections(String processGroupId) throws Exception {
+        if (countQueuedFlowFiles(processGroupId) == 0L) {
+            logger.info("Process Group {} sin FlowFiles en cola. No se solicita vaciado de conexiones.", processGroupId);
+            return;
+        }
+
         JsonObject requestEntity = createDropAllFlowFilesRequest(processGroupId);
         String dropRequestId = extractDropRequestId(requestEntity);
         if (dropRequestId == null || dropRequestId.isBlank()) {
@@ -942,9 +977,24 @@ public class NiFiClient {
                 assertNoQueuedFlowFiles(processGroupId);
                 return;
             }
+
+            if (countQueuedFlowFiles(processGroupId) == 0L) {
+                logger.info("NiFi aún no marcó complete=true para {}, pero el Process Group ya no tiene FlowFiles en cola.",
+                        processGroupId);
+                deleteDropAllFlowFilesRequest(processGroupId, dropRequestId);
+                assertNoQueuedFlowFiles(processGroupId);
+                return;
+            }
+
             Thread.sleep(1000L);
         }
 
+        try {
+            deleteDropAllFlowFilesRequest(processGroupId, dropRequestId);
+        } catch (Exception cleanupError) {
+            logger.warn("No se pudo eliminar el drop request {} tras timeout en {}: {}",
+                    dropRequestId, processGroupId, cleanupError.getMessage());
+        }
         throw new RuntimeException("Timeout vaciando colas del Process Group " + processGroupId);
     }
 
