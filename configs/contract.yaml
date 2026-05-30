@@ -1,46 +1,37 @@
 migration:
-  name: "ecommerce-migration"
-  description: "Migración full de modelo e-commerce: customers, products, orders, order_items"
-  version: "1.0"
-  author: "${USERNAME}"
+  name: "nombre_migracion"
+  description: "descripcion_de_la_migracion"
+  version: "x.x"
+  author: "nombre_del_autor"
 
 tables:
-  customers:
+  tabla_full:
     source:
-      schema: "public"
-      table: "customers"
+      schema: "nombre_esquema_origen"
+      table: "nombre_tabla_origen"
     target:
-      schema: "public"
-      table: "customers"
+      schema: "nombre_esquema_destino"
+      table: "nombre_tabla_destino"
     enabled: true
     migrationType: "full"
+    filters:
+      where: "condicion SQL opcional"
 
-  products:
+  tabla_incremental:
     source:
-      schema: "public"
-      table: "products"
+      schema: "nombre_esquema_origen"
+      table: "nombre_tabla_origen"
     target:
-      schema: "public"
-      table: "products"
+      schema: "nombre_esquema_destino"
+      table: "nombre_tabla_destino"
     enabled: true
-    migrationType: "full"
-
-  orders:
-    source:
-      schema: "public"
-      table: "orders"
-    target:
-      schema: "public"
-      table: "orders"
-    enabled: true
-    migrationType: "full"
-
-  order_items:
-    source:
-      schema: "public"
-      table: "order_items"
-    target:
-      schema: "public"
-      table: "order_items"
-    enabled: true
-    migrationType: "full"
+    migrationType: "incremental"
+    incrementalConfig:
+      column: "nombre_columna_referencia"
+      startValue: "valor_de_inicio"
+      batchSize: numero_registros_migrar
+      loadStrategy: "upsert/append/append_only"
+      idempotencyKeyColumns:
+        - "columna_clave_idempotencia"
+    filters:
+      where: "condicion SQL opcional"
