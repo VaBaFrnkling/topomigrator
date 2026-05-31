@@ -2,6 +2,7 @@ package es.upm.tfg.topomigrator.execution;
 
 import es.upm.tfg.topomigrator.exceptions.InvalidChangelogException;
 import es.upm.tfg.topomigrator.model.MigrationContract;
+import es.upm.tfg.topomigrator.orchestration.dependency.TableNode;
 import es.upm.tfg.topomigrator.support.QualityTestData;
 import org.junit.Rule;
 import org.junit.Test;
@@ -9,12 +10,15 @@ import org.junit.rules.TemporaryFolder;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.List;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 
 public class LiquibaseSchemaExecutorQualityTest {
@@ -31,6 +35,28 @@ public class LiquibaseSchemaExecutorQualityTest {
                 () -> LiquibaseSchemaExecutor.applyTargetSchemas(contract, changelogsDir, ignored -> {
                     throw new AssertionError("No debe conectar si el changelog requerido no existe.");
                 }));
+    }
+
+    @Test
+    public void applyTargetSchemasUsesResolvedTopologicalOrder() throws Exception {
+        MigrationContract contract = QualityTestData.contractWith(
+                QualityTestData.fullTable("orders"),
+                QualityTestData.fullTable("customers")
+        );
+        Path changelogsDir = temporaryFolder.newFolder("ordered-changelogs").toPath();
+        writeChangelog(changelogsDir, "public", "orders");
+        writeChangelog(changelogsDir, "public", "customers");
+        List<String> tableExistenceChecks = new ArrayList<>();
+        Connection connection = connectionWithExistingTables(tableExistenceChecks);
+
+        LiquibaseSchemaExecutor.applyTargetSchemas(
+                contract,
+                List.of(new TableNode("customers"), new TableNode("orders")),
+                changelogsDir,
+                ignored -> connection
+        );
+
+        assertEquals(List.of("customers", "orders"), tableExistenceChecks);
     }
 
     @Test
@@ -102,6 +128,26 @@ public class LiquibaseSchemaExecutorQualityTest {
                 }
                 return defaultValue(method.getReturnType());
             }
+        });
+    }
+
+    private static Connection connectionWithExistingTables(List<String> tableExistenceChecks) {
+        DatabaseMetaData metadata = proxy(DatabaseMetaData.class, (proxy, method, args) -> {
+            if (method.getName().equals("getTables")) {
+                tableExistenceChecks.add((String) args[2]);
+                return singleRowResultSet();
+            }
+            return defaultValue(method.getReturnType());
+        });
+
+        return proxy(Connection.class, (proxy, method, args) -> {
+            if (method.getName().equals("getMetaData")) {
+                return metadata;
+            }
+            if (method.getName().equals("close")) {
+                return null;
+            }
+            return defaultValue(method.getReturnType());
         });
     }
 

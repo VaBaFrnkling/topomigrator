@@ -80,47 +80,18 @@ public class App {
             runPhase("CHANGELOG_VALIDATION", errorArtifactWriter, errorContext,
                     () -> TargetChangelogValidator.validate(contract));
 
+            DependencyPlan dependencyPlan = runPhase("DEPENDENCY_RESOLUTION", errorArtifactWriter, errorContext,
+                    () -> resolveDependencyPlan(contract));
+
             runPhase("LIQUIBASE_EXECUTION", errorArtifactWriter, errorContext,
-                    () -> LiquibaseSchemaExecutor.applyTargetSchemas(contract));
+                    () -> LiquibaseSchemaExecutor.applyTargetSchemas(contract, dependencyPlan.getExecutionOrder()));
 
             runPhase("SCHEMA_COMPATIBILITY_VALIDATION", errorArtifactWriter, errorContext,
                     () -> SchemaCompatibilityValidator.validateTargetAndMapping(contract));
 
-            Map<String, String> physicalToContractKey = runPhase("DEPENDENCY_INDEXING", errorArtifactWriter, errorContext, () -> {
-                Map<String, String> index = new LinkedHashMap<>();
-                for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
-                    String physicalId = TableIdentityUtils.toSourcePhysicalId(entry.getValue());
-                    index.put(physicalId, entry.getKey());
-                }
-                return index;
-            });
-
-            List<ForeignKeyDependency> rawDependencies = runPhase("DEPENDENCY_EXTRACTION", errorArtifactWriter, errorContext, () -> {
-                try (Connection sourceConnection = DatabaseConnectionManager.getConnection(contract.getDatabase().getSourceConnection())) {
-                    MetadataDependencyExtractor extractor = new MetadataDependencyExtractor();
-                    return extractor.extractDependencies(sourceConnection, physicalToContractKey.keySet());
-                }
-            });
-
-            List<ForeignKeyDependency> dependencies = runPhase("DEPENDENCY_MAPPING", errorArtifactWriter, errorContext, () -> {
-                List<ForeignKeyDependency> mappedDependencies = new ArrayList<>();
-                for (ForeignKeyDependency dep : rawDependencies) {
-                    String logicalParent = physicalToContractKey.get(dep.getParentTable());
-                    String logicalDependent = physicalToContractKey.get(dep.getDependentTable());
-                    if (logicalParent != null && logicalDependent != null) {
-                        mappedDependencies.add(new ForeignKeyDependency(logicalParent, logicalDependent));
-                    }
-                }
-                return mappedDependencies;
-            });
-
-            DependencyResolver resolver = new DependencyResolver();
-            List<TableNode> executionOrder = runPhase("DEPENDENCY_RESOLUTION", errorArtifactWriter, errorContext,
-                    () -> resolver.resolveExecutionOrder(contract.getTables().keySet(), dependencies));
-
             ExecutionEngine engine = runPhase("NIFI_CLIENT_INITIALIZATION", errorArtifactWriter, errorContext,
                     () -> new ExecutionEngine(errorArtifactWriter));
-            engine.executeMigration(executionOrder, contract, dependencies);
+            engine.executeMigration(dependencyPlan.getExecutionOrder(), contract, dependencyPlan.getDependencies());
 
             logger.info("Migracion orquestada y desplegada correctamente.");
 
@@ -128,6 +99,39 @@ public class App {
             logger.error("Error critico durante la orquestacion de la migracion: ", e);
             System.exit(1);
         }
+    }
+
+    static DependencyPlan resolveDependencyPlan(MigrationContract contract) throws Exception {
+        return resolveDependencyPlan(contract, sourceConnectionConfig ->
+                DatabaseConnectionManager.getConnection(sourceConnectionConfig));
+    }
+
+    static DependencyPlan resolveDependencyPlan(MigrationContract contract,
+                                                SourceConnectionFactory sourceConnectionFactory) throws Exception {
+        Map<String, String> physicalToContractKey = new LinkedHashMap<>();
+        for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
+            String physicalId = TableIdentityUtils.toSourcePhysicalId(entry.getValue());
+            physicalToContractKey.put(physicalId, entry.getKey());
+        }
+
+        List<ForeignKeyDependency> rawDependencies;
+        try (Connection sourceConnection = sourceConnectionFactory.getConnection(contract.getDatabase().getSourceConnection())) {
+            MetadataDependencyExtractor extractor = new MetadataDependencyExtractor();
+            rawDependencies = extractor.extractDependencies(sourceConnection, physicalToContractKey.keySet());
+        }
+
+        List<ForeignKeyDependency> dependencies = new ArrayList<>();
+        for (ForeignKeyDependency dep : rawDependencies) {
+            String logicalParent = physicalToContractKey.get(dep.getParentTable());
+            String logicalDependent = physicalToContractKey.get(dep.getDependentTable());
+            if (logicalParent != null && logicalDependent != null) {
+                dependencies.add(new ForeignKeyDependency(logicalParent, logicalDependent));
+            }
+        }
+
+        DependencyResolver resolver = new DependencyResolver();
+        List<TableNode> executionOrder = resolver.resolveExecutionOrder(contract.getTables().keySet(), dependencies);
+        return new DependencyPlan(dependencies, executionOrder);
     }
 
     private static <T> T runPhase(String phase,
@@ -160,5 +164,28 @@ public class App {
     @FunctionalInterface
     private interface PhaseAction {
         void run() throws Exception;
+    }
+
+    @FunctionalInterface
+    interface SourceConnectionFactory {
+        Connection getConnection(es.upm.tfg.topomigrator.model.ConnectionConfig config) throws Exception;
+    }
+
+    static final class DependencyPlan {
+        private final List<ForeignKeyDependency> dependencies;
+        private final List<TableNode> executionOrder;
+
+        DependencyPlan(List<ForeignKeyDependency> dependencies, List<TableNode> executionOrder) {
+            this.dependencies = dependencies;
+            this.executionOrder = executionOrder;
+        }
+
+        List<ForeignKeyDependency> getDependencies() {
+            return dependencies;
+        }
+
+        List<TableNode> getExecutionOrder() {
+            return executionOrder;
+        }
     }
 }

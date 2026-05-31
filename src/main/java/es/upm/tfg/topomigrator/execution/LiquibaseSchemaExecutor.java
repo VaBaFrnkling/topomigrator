@@ -4,6 +4,7 @@ import es.upm.tfg.topomigrator.exceptions.InvalidChangelogException;
 import es.upm.tfg.topomigrator.model.ConnectionConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
+import es.upm.tfg.topomigrator.orchestration.dependency.TableNode;
 import es.upm.tfg.topomigrator.util.DatabaseConnectionManager;
 import liquibase.Scope;
 import liquibase.command.CommandScope;
@@ -23,9 +24,13 @@ import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Applies one Liquibase changelog per active target table.
@@ -37,11 +42,26 @@ public class LiquibaseSchemaExecutor {
         applyTargetSchemas(contract, DatabaseConnectionManager::getConnection);
     }
 
+    public static void applyTargetSchemas(MigrationContract contract, List<TableNode> executionOrder) {
+        applyTargetSchemas(contract, executionOrder, DatabaseConnectionManager::getConnection);
+    }
+
     static void applyTargetSchemas(MigrationContract contract, ConnectionFactory connectionFactory) {
         applyTargetSchemas(contract, resolveChangelogsDir(), connectionFactory);
     }
 
+    static void applyTargetSchemas(MigrationContract contract, List<TableNode> executionOrder, ConnectionFactory connectionFactory) {
+        applyTargetSchemas(contract, executionOrder, resolveChangelogsDir(), connectionFactory);
+    }
+
     static void applyTargetSchemas(MigrationContract contract, Path changelogsDir, ConnectionFactory connectionFactory) {
+        applyTargetSchemas(contract, null, changelogsDir, connectionFactory);
+    }
+
+    static void applyTargetSchemas(MigrationContract contract,
+                                   List<TableNode> executionOrder,
+                                   Path changelogsDir,
+                                   ConnectionFactory connectionFactory) {
         log.info("Fase de Liquibase: desplegando esquemas DDL en destino para tablas activas.");
 
         if (contract == null || contract.getTables() == null || contract.getTables().isEmpty()) {
@@ -52,10 +72,11 @@ public class LiquibaseSchemaExecutor {
         }
 
         Map<String, Path> changelogPathsByTable = resolveChangelogPaths(contract, changelogsDir);
+        List<String> orderedTableIds = resolveTableExecutionSequence(contract, executionOrder);
 
         try (Connection targetConn = connectionFactory.getConnection(contract.getDatabase().getTargetConnection());
              DirectoryResourceAccessor resourceAccessor = new DirectoryResourceAccessor(changelogsDir.toAbsolutePath())) {
-            applyChangelogs(contract, changelogPathsByTable, targetConn, resourceAccessor);
+            applyChangelogs(contract, changelogPathsByTable, orderedTableIds, targetConn, resourceAccessor);
         } catch (InvalidChangelogException e) {
             throw e;
         } catch (Exception e) {
@@ -76,14 +97,14 @@ public class LiquibaseSchemaExecutor {
 
     private static void applyChangelogs(MigrationContract contract,
                                         Map<String, Path> changelogPathsByTable,
+                                        List<String> orderedTableIds,
                                         Connection targetConn,
                                         DirectoryResourceAccessor resourceAccessor) throws Exception {
         DatabaseMetaData targetMeta = targetConn.getMetaData();
         Database database = null;
 
-        for (Map.Entry<String, TableMigration> entry : contract.getTables().entrySet()) {
-            String tableId = entry.getKey();
-            TableMigration tableMigration = entry.getValue();
+        for (String tableId : orderedTableIds) {
+            TableMigration tableMigration = contract.getTables().get(tableId);
             String targetSchema = tableMigration.getTarget().getSchema();
             String targetTable = tableMigration.getTarget().getTable();
             Path changelogPath = changelogPathsByTable.get(tableId);
@@ -112,6 +133,44 @@ public class LiquibaseSchemaExecutor {
                         + changelogPath.getFileName() + " en la base de datos destino.", e);
             }
         }
+    }
+
+    private static List<String> resolveTableExecutionSequence(MigrationContract contract, List<TableNode> executionOrder) {
+        if (executionOrder == null || executionOrder.isEmpty()) {
+            return new ArrayList<>(contract.getTables().keySet());
+        }
+
+        List<String> orderedTableIds = new ArrayList<>();
+        Set<String> seen = new LinkedHashSet<>();
+        for (TableNode tableNode : executionOrder) {
+            if (tableNode == null || tableNode.getName() == null || tableNode.getName().trim().isEmpty()) {
+                throw new InvalidChangelogException("El orden de ejecución contiene una tabla nula o vacía.");
+            }
+
+            String tableId = resolveContractTableId(contract, tableNode.getName());
+            if (!seen.add(tableId)) {
+                throw new InvalidChangelogException("El orden de ejecución contiene la tabla duplicada: " + tableId);
+            }
+            orderedTableIds.add(tableId);
+        }
+
+        if (orderedTableIds.size() != contract.getTables().size()) {
+            throw new InvalidChangelogException("El orden de ejecución no contiene todas las tablas activas del contrato.");
+        }
+
+        return orderedTableIds;
+    }
+
+    private static String resolveContractTableId(MigrationContract contract, String tableName) {
+        if (contract.getTables().containsKey(tableName)) {
+            return tableName;
+        }
+        for (String contractTableId : contract.getTables().keySet()) {
+            if (contractTableId.equalsIgnoreCase(tableName)) {
+                return contractTableId;
+            }
+        }
+        throw new InvalidChangelogException("El orden de ejecución contiene una tabla no definida en el contrato: " + tableName);
     }
 
     private static Map<String, Path> resolveChangelogPaths(MigrationContract contract, Path changelogsDir) {
