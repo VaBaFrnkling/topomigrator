@@ -78,7 +78,7 @@ public class NiFiClient {
 
     /**
      * Configura el cliente HTTP para confiar en certificados autofirmados
-     * (necesario ya que NiFi 2.0 arranca con TLS autofirmado por defecto).
+     * (necesario porque la imagen de NiFi usada por el proyecto arranca con TLS autofirmado).
      */
     private void initializeClient() {
         try {

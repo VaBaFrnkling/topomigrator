@@ -1,12 +1,10 @@
 package es.upm.tfg.topomigrator.execution;
 
-import es.upm.tfg.topomigrator.audit.TableTrace;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 import es.upm.tfg.topomigrator.support.QualityTestData;
 import org.junit.Test;
 
-import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -35,9 +33,8 @@ public class FlowVariableBuilderQualityTest {
     public void buildCreatesAllNiFiTokensForFullMigration() {
         TableMigration table = QualityTestData.fullTable("customers");
         MigrationContract contract = QualityTestData.contractWith(table);
-        TableTrace trace = tableTrace(table);
 
-        Map<String, String> variables = builder.build("exec-001", contract, table, trace, null);
+        Map<String, String> variables = builder.build("exec-001", contract, table, null);
 
         assertEquals(expectedNiFiTokens(), variables.keySet());
         assertEquals("exec-001", variables.get("##EXECUTION_ID##"));
@@ -48,22 +45,19 @@ public class FlowVariableBuilderQualityTest {
         assertEquals("SELECT * FROM public.customers", variables.get("##QUERY_SQL##"));
         assertEquals("jdbc:postgresql://source:5432/source_db", variables.get("##SOURCE_DB_URL##"));
         assertEquals("PostgreSQL", variables.get("##TARGET_DB_TYPE##"));
-        assertTrue(trace.auditMetrics.warnings.isEmpty());
     }
 
     @Test
     public void buildConfiguresIncrementalUpsertWithIdempotencyKeysAndCursorSql() {
         TableMigration table = QualityTestData.incrementalTable("orders");
         MigrationContract contract = QualityTestData.contractWith(table);
-        TableTrace trace = tableTrace(table);
 
-        Map<String, String> variables = builder.build("exec-002", contract, table, trace, "2026-05-01T00:00:00");
+        Map<String, String> variables = builder.build("exec-002", contract, table, "2026-05-01T00:00:00");
 
         assertEquals("UPSERT", variables.get("##STATEMENT_TYPE##"));
         assertEquals("id", variables.get("##UPDATE_KEYS##"));
         assertEquals("SELECT * FROM public.orders WHERE updated_at > '2026-05-01T00:00:00' ORDER BY updated_at ASC LIMIT 100",
                 variables.get("##QUERY_SQL##"));
-        assertTrue(trace.auditMetrics.warnings.isEmpty());
     }
 
     @Test
@@ -99,24 +93,10 @@ public class FlowVariableBuilderQualityTest {
         MigrationContract contract = QualityTestData.contractWith(table);
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
-                () -> localBuilder.build("exec-003", contract, table, tableTrace(table), null));
+                () -> localBuilder.build("exec-003", contract, table, null));
 
         assertTrue(error.getMessage().contains("UPSERT"));
         assertTrue(error.getMessage().contains("clave primaria"));
-    }
-
-    private TableTrace tableTrace(TableMigration table) {
-        TableTrace trace = new TableTrace();
-        trace.table = new TableTrace.TableMapping();
-        trace.table.source = new TableTrace.SchemaTable();
-        trace.table.source.schema = table.getSource().getSchema();
-        trace.table.source.name = table.getSource().getTable();
-        trace.table.target = new TableTrace.SchemaTable();
-        trace.table.target.schema = table.getTarget().getSchema();
-        trace.table.target.name = table.getTarget().getTable();
-        trace.auditMetrics = new TableTrace.AuditMetrics();
-        trace.auditMetrics.warnings = new ArrayList<>();
-        return trace;
     }
 
     private Set<String> expectedNiFiTokens() {

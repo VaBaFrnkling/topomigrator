@@ -1,6 +1,5 @@
 package es.upm.tfg.topomigrator.execution;
 
-import es.upm.tfg.topomigrator.audit.TableTrace;
 import es.upm.tfg.topomigrator.model.ConnectionConfig;
 import es.upm.tfg.topomigrator.model.IncrementalConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
@@ -26,14 +25,13 @@ class FlowVariableBuilder {
     Map<String, String> build(String executionId,
                               MigrationContract contract,
                               TableMigration tableConfig,
-                              TableTrace tableTrace,
                               String effectiveIncrementalStartValue) {
         Map<String, String> flowConfigVariables = new LinkedHashMap<>();
         flowConfigVariables.put("##EXECUTION_ID##", executionId);
-        flowConfigVariables.put("##TABLA_ORIGEN##", tableTrace.table.source.name);
-        flowConfigVariables.put("##ESQUEMA_ORIGEN##", defaultSchema(tableTrace.table.source.schema));
-        flowConfigVariables.put("##TABLA_DESTINO##", tableTrace.table.target.name);
-        flowConfigVariables.put("##ESQUEMA_DESTINO##", defaultSchema(tableTrace.table.target.schema));
+        flowConfigVariables.put("##TABLA_ORIGEN##", tableConfig.getSource().getTable());
+        flowConfigVariables.put("##ESQUEMA_ORIGEN##", defaultSchema(tableConfig.getSource().getSchema()));
+        flowConfigVariables.put("##TABLA_DESTINO##", tableConfig.getTarget().getTable());
+        flowConfigVariables.put("##ESQUEMA_DESTINO##", defaultSchema(tableConfig.getTarget().getSchema()));
 
         ConnectionConfig source = contract.getDatabase().getSourceConnection();
         ConnectionConfig target = contract.getDatabase().getTargetConnection();
@@ -51,7 +49,7 @@ class FlowVariableBuilder {
         flowConfigVariables.put("##TARGET_DB_DRIVER_LOCATION##", defaultValue(target.getDriverLocation(), DEFAULT_DRIVER_LOCATION));
         flowConfigVariables.put("##TARGET_DB_TYPE##", defaultValue(target.getDatabaseType(), inferDatabaseType(target)));
 
-        configureWriteMode(contract, tableConfig, tableTrace, flowConfigVariables);
+        configureWriteMode(contract, tableConfig, flowConfigVariables);
         try {
             flowConfigVariables.put("##QUERY_SQL##", metricsService.buildSourceSelectSql(contract, tableConfig, effectiveIncrementalStartValue));
         } catch (Exception e) {
@@ -63,7 +61,6 @@ class FlowVariableBuilder {
 
     private void configureWriteMode(MigrationContract contract,
                                     TableMigration tableConfig,
-                                    TableTrace tableTrace,
                                     Map<String, String> flowConfigVariables) {
         String migrationType = tableConfig.getMigrationType() != null
                 ? tableConfig.getMigrationType().trim().toLowerCase(Locale.ROOT)

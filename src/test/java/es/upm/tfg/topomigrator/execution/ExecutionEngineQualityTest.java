@@ -177,7 +177,6 @@ public class ExecutionEngineQualityTest {
         assertEquals(1, traces.summary.tables.successful);
         assertEquals(0, traces.summary.tables.failed);
         assertEquals("SUCCESS", traces.tableTraces.get(0).status);
-        assertEquals("SUCCESS", traces.tableTraces.get(0).migrationStatus);
         assertEquals(20L, traces.tableTraces.get(0).recordsProcessed);
         assertEquals("FAILED", traces.tableTraces.get(0).cleanup.status);
         assertTrue(traces.tableTraces.get(0).cleanup.processGroupId.contains("Migracion_customers"));

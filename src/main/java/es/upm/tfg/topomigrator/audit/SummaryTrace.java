@@ -43,7 +43,6 @@ public class SummaryTrace {
         public String executionId;
         public int order;
         public String status;
-        public String migrationStatus;
         public String cleanupStatus;
         public String cleanupProcessGroupId;
         public String cleanupMessage;

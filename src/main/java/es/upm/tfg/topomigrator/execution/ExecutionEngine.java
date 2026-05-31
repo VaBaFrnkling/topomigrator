@@ -376,7 +376,7 @@ public class ExecutionEngine {
             }
 
             if (checks % 10 == 0) {
-                logger.info("⏳ NiFi Monitor [{}]: ActiveThreads={}, Queued={}, Read={}", tableName, activeThreads, queuedCount, bytesRead);
+                logger.info("NiFi Monitor [{}]: ActiveThreads={}, Queued={}, Read={}", tableName, activeThreads, queuedCount, bytesRead);
             }
 
             if (activeThreads == 0 && queuedCount == 0 && checks > 2) {
@@ -402,7 +402,6 @@ public class ExecutionEngine {
                 executionId,
                 contract,
                 tableConfig,
-                tableTrace,
                 effectiveIncrementalStartValue
         );
         logger.info("Consulta SQL enviada a NiFi para {}.{}: {}",
@@ -457,8 +456,6 @@ public class ExecutionEngine {
             );
             tableTrace.incrementalInfo.lastProcessedValue = lastValue;
             tableTrace.incrementalInfo.stateUpdated = true;
-        } else {
-            tableTrace.auditMetrics.warnings.add("No se actualizó el estado incremental porque la consulta no seleccionó nuevos registros.");
         }
     }
 
@@ -707,7 +704,6 @@ public class ExecutionEngine {
 
     private void setMigrationStatus(TableTrace tableTrace, String status) {
         tableTrace.status = status;
-        tableTrace.migrationStatus = status;
     }
 
     private void markCleanupResult(TableTrace tableTrace,
@@ -774,7 +770,6 @@ public class ExecutionEngine {
         tableTrace.timing = new Timing();
         tableTrace.timing.startTime = LocalDateTime.now().format(formatter);
         tableTrace.auditMetrics = new TableTrace.AuditMetrics();
-        tableTrace.auditMetrics.strategy = "WRITE_MODE_AWARE_SOURCE_COUNT_WITH_TARGET_STATE_VALIDATION";
         tableTrace.auditMetrics.warnings = new ArrayList<>();
         tableTrace.cleanup = new TableTrace.CleanupInfo();
         tableTrace.cleanup.status = CLEANUP_STATUS_PENDING;
@@ -806,7 +801,6 @@ public class ExecutionEngine {
         s.executionId = tableTrace.tableExecutionId;
         s.order = executionOrder;
         s.status = tableTrace.status;
-        s.migrationStatus = tableTrace.migrationStatus;
         s.cleanupStatus = tableTrace.cleanup != null ? tableTrace.cleanup.status : null;
         s.cleanupProcessGroupId = tableTrace.cleanup != null ? tableTrace.cleanup.processGroupId : null;
         s.cleanupMessage = tableTrace.cleanup != null ? tableTrace.cleanup.message : null;

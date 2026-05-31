@@ -10,7 +10,6 @@ public class TableTrace {
     public IncrementalInfo incrementalInfo;
     public String migrationType;
     public String status;
-    public String migrationStatus;
     public CleanupInfo cleanup;
     public long recordsProcessed;
     public Timing timing;
@@ -43,7 +42,6 @@ public class TableTrace {
     }
 
     public static class AuditMetrics {
-        public String strategy;
         public Long sourceSelectedRecords;
         public Long targetRowsBefore;
         public Long targetRowsAfter;
