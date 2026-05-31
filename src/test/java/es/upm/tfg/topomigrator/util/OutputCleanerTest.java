@@ -30,7 +30,7 @@ public class OutputCleanerTest {
         Files.createDirectories(incrementalState.getParent());
         Files.writeString(errorLog, "stale test error");
         Files.writeString(traceFile, "stale trace");
-        Files.writeString(lastExecutionId, "tm-exec-0007");
+        Files.writeString(lastExecutionId, "7");
         Files.writeString(applicationLog, "existing app log");
         Files.writeString(incrementalState, "{}");
 
