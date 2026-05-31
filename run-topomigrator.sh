@@ -101,24 +101,55 @@ cleanup_compose_stack() {
   fi
 }
 
+get_service_container_id() {
+  compose ps -q "$1" 2>/dev/null | head -n 1 | tr -d '\r\n'
+}
+
+inspect_container_state() {
+  docker inspect \
+    --format '{{.State.Status}}|{{.State.ExitCode}}|{{.State.Running}}|{{.State.Restarting}}|{{.State.Dead}}' \
+    "$1" 2>/dev/null | head -n 1 | tr -d '\r'
+}
+
+normalize_container_status() {
+  local status="$1"
+  local running="$2"
+  local restarting="$3"
+  local dead="$4"
+
+  if [[ -n "$status" ]]; then
+    printf '%s' "$status"
+    return 0
+  fi
+
+  if [[ "$dead" == "true" ]]; then
+    printf 'dead'
+  elif [[ "$restarting" == "true" ]]; then
+    printf 'restarting'
+  elif [[ "$running" == "true" ]]; then
+    printf 'running'
+  else
+    printf 'unknown'
+  fi
+}
+
 compose_service_has_exited() {
-  compose ps --status exited --services 2>/dev/null | grep -Fxq "$1"
-}
+  local container_id
+  local inspect_data
+  local status
+  local running
+  local restarting
+  local dead
 
-get_service_ps_json() {
-  compose ps --format json "$1" 2>/dev/null | tr -d '\r\n'
-}
+  container_id="$(get_service_container_id "$1")"
+  [[ -n "$container_id" ]] || return 1
 
-extract_json_string_field() {
-  local key="$1"
-  local json="$2"
-  printf '%s' "$json" | sed -n "s/.*\"$key\":\"\\([^\"]*\\)\".*/\\1/p" | head -n 1
-}
+  inspect_data="$(inspect_container_state "$container_id")" || return 1
+  [[ -n "$inspect_data" ]] || return 1
 
-extract_json_numeric_field() {
-  local key="$1"
-  local json="$2"
-  printf '%s' "$json" | sed -n "s/.*\"$key\":\\([0-9][0-9]*\\).*/\\1/p" | head -n 1
+  IFS='|' read -r status _ running restarting dead <<<"$inspect_data"
+  status="$(normalize_container_status "$status" "$running" "$restarting" "$dead")"
+  [[ "$status" == "exited" || "$status" == "dead" ]]
 }
 
 wait_for_nifi_functional_readiness() {
@@ -169,21 +200,83 @@ start_topomigrator() {
 wait_for_topomigrator_exit() {
   local deadline=$((SECONDS + TOPOMIGRATOR_WAIT_TIMEOUT_SECONDS))
   local attempt=0
-  local ps_json
+  local container_id
+  local last_seen_container_id=""
+  local inspect_data
   local state
   local exit_code
+  local running
+  local restarting
+  local dead
+  local saw_container=0
 
   log "==> Esperar a que TopoMigrator termine"
 
   while (( SECONDS < deadline )); do
     attempt=$((attempt + 1))
-    ps_json="$(get_service_ps_json topomigrator)"
-    state="$(extract_json_string_field State "$ps_json")"
-    exit_code="$(extract_json_numeric_field ExitCode "$ps_json")"
+    container_id="$(get_service_container_id topomigrator)"
+
+    if [[ -z "$container_id" ]]; then
+      if (( saw_container == 0 )); then
+        if (( attempt == 1 || attempt % 12 == 0 )); then
+          log "TopoMigrator aun no tiene contenedor visible en Docker Compose."
+        fi
+        sleep 5
+        continue
+      fi
+
+      inspect_data="$(inspect_container_state "$last_seen_container_id")" || inspect_data=""
+      if [[ -z "$inspect_data" ]]; then
+        log "ERROR: Docker Compose ha dejado de exponer topomigrator y el ultimo contenedor conocido ya no puede inspeccionarse."
+        compose_logged ps || true
+        compose_logged logs --tail=200 topomigrator nifi || true
+        return 1
+      fi
+
+      IFS='|' read -r state exit_code running restarting dead <<<"$inspect_data"
+      state="$(normalize_container_status "$state" "$running" "$restarting" "$dead")"
+
+      case "$state" in
+        exited|dead)
+          [[ "$exit_code" =~ ^[0-9]+$ ]] || exit_code=1
+          log "TopoMigrator finalizo con codigo $exit_code."
+          return "$exit_code"
+          ;;
+        running|restarting|created)
+          if (( attempt == 1 || attempt % 12 == 0 )); then
+            log "AVISO: Docker Compose ya no lista topomigrator, pero el ultimo contenedor conocido sigue con estado=$state."
+          fi
+          ;;
+        *)
+          log "AVISO: estado inesperado del ultimo contenedor conocido de topomigrator: $state"
+          ;;
+      esac
+
+      sleep 5
+      continue
+    fi
+
+    if [[ "$container_id" != "$last_seen_container_id" ]]; then
+      last_seen_container_id="$container_id"
+      saw_container=1
+      log "TopoMigrator visible en Docker (contenedor=${container_id:0:12})."
+    fi
+
+    inspect_data="$(inspect_container_state "$container_id")" || inspect_data=""
+    if [[ -z "$inspect_data" ]]; then
+      if (( attempt == 1 || attempt % 12 == 0 )); then
+        log "AVISO: no pude inspeccionar el contenedor real de topomigrator (${container_id:0:12}). Reintentando..."
+      fi
+      sleep 5
+      continue
+    fi
+
+    IFS='|' read -r state exit_code running restarting dead <<<"$inspect_data"
+    state="$(normalize_container_status "$state" "$running" "$restarting" "$dead")"
 
     case "$state" in
       exited|dead)
-        [[ -n "$exit_code" ]] || exit_code=1
+        [[ "$exit_code" =~ ^[0-9]+$ ]] || exit_code=1
         log "TopoMigrator finalizo con codigo $exit_code."
         return "$exit_code"
         ;;
