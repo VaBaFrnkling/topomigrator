@@ -285,9 +285,6 @@ wait_for_topomigrator_exit() {
           log "TopoMigrator sigue en ejecucion (estado=$state)."
         fi
         ;;
-      "")
-        log "AVISO: aun no hay estado visible de Docker Compose para topomigrator."
-        ;;
       *)
         log "AVISO: estado inesperado de topomigrator: $state"
         ;;

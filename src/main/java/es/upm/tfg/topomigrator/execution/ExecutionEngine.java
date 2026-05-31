@@ -953,19 +953,9 @@ public class ExecutionEngine {
                 return new AuditEvaluation(CONSISTENCY_CONSISTENT, OUTCOME_UPSERT_INSERTS_ONLY, null);
             }
             if (targetNetDelta > 0L) {
-                return new AuditEvaluation(
-                        CONSISTENCY_CONSISTENT,
-                        OUTCOME_UPSERT_INSERTS_AND_UPDATES,
-                        "Se detectaron menos filas nuevas netas que filas seleccionadas en origen; esto es compatible con UPSERT sobre datos parcialmente existentes. "
-                                + auditContext
-                );
+                return new AuditEvaluation(CONSISTENCY_CONSISTENT, OUTCOME_UPSERT_INSERTS_AND_UPDATES, null);
             }
-            return new AuditEvaluation(
-                    CONSISTENCY_CONSISTENT,
-                    OUTCOME_UPSERT_NO_NET_CHANGE,
-                    "No hubo nuevas filas netas en destino; en modo UPSERT esto es compatible con reejecucion idempotente o con actualizaciones in-place. "
-                            + auditContext
-            );
+            return new AuditEvaluation(CONSISTENCY_CONSISTENT, OUTCOME_UPSERT_NO_NET_CHANGE, null);
         }
 
         if (sourceSelectedRows != null) {

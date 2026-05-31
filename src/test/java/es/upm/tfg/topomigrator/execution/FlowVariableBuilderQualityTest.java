@@ -48,7 +48,7 @@ public class FlowVariableBuilderQualityTest {
         assertEquals("SELECT * FROM public.customers", variables.get("##QUERY_SQL##"));
         assertEquals("jdbc:postgresql://source:5432/source_db", variables.get("##SOURCE_DB_URL##"));
         assertEquals("PostgreSQL", variables.get("##TARGET_DB_TYPE##"));
-        assertTrue(trace.auditMetrics.warnings.get(0).contains("Migracion full"));
+        assertTrue(trace.auditMetrics.warnings.isEmpty());
     }
 
     @Test
@@ -63,7 +63,7 @@ public class FlowVariableBuilderQualityTest {
         assertEquals("id", variables.get("##UPDATE_KEYS##"));
         assertEquals("SELECT * FROM public.orders WHERE updated_at > '2026-05-01T00:00:00' ORDER BY updated_at ASC LIMIT 100",
                 variables.get("##QUERY_SQL##"));
-        assertTrue(trace.auditMetrics.warnings.get(0).contains("UPSERT"));
+        assertTrue(trace.auditMetrics.warnings.isEmpty());
     }
 
     @Test

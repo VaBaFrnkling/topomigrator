@@ -6,7 +6,6 @@ import es.upm.tfg.topomigrator.model.IncrementalConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
 
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -76,7 +75,6 @@ class FlowVariableBuilder {
             List<String> updateKeyColumns = resolveTargetIdempotencyKeys(contract, tableConfig, "full");
             statementType = "UPSERT";
             updateKeys = String.join(",", updateKeyColumns);
-            addWarning(tableTrace, "Migracion full configurada en modo UPSERT con claves de idempotencia inferidas: " + updateKeys);
         } else if ("incremental".equals(migrationType)) {
             IncrementalConfig incrementalConfig = tableConfig.getIncrementalConfig();
             String loadStrategy = normalizeLoadStrategy(incrementalConfig != null ? incrementalConfig.getLoadStrategy() : null);
@@ -85,11 +83,8 @@ class FlowVariableBuilder {
                 List<String> updateKeyColumns = resolveIncrementalIdempotencyKeys(contract, tableConfig, incrementalConfig);
                 statementType = "UPSERT";
                 updateKeys = String.join(",", updateKeyColumns);
-                addWarning(tableTrace, "Migracion incremental configurada en modo UPSERT con claves de idempotencia: " + updateKeys);
             } else if ("append".equals(loadStrategy) || "append_only".equals(loadStrategy)) {
                 statementType = "INSERT";
-                addWarning(tableTrace, "Migracion incremental configurada en modo " + loadStrategy
-                        + ": se usa INSERT y no se garantiza idempotencia ante reejecuciones.");
             } else {
                 throw new IllegalStateException("loadStrategy no soportada para migracion incremental en "
                         + qualifiedTargetName(tableConfig) + ": " + loadStrategy
@@ -131,16 +126,6 @@ class FlowVariableBuilder {
         }
 
         return updateKeyColumns;
-    }
-
-    private void addWarning(TableTrace tableTrace, String warning) {
-        if (tableTrace.auditMetrics == null) {
-            tableTrace.auditMetrics = new TableTrace.AuditMetrics();
-        }
-        if (tableTrace.auditMetrics.warnings == null) {
-            tableTrace.auditMetrics.warnings = new ArrayList<>();
-        }
-        tableTrace.auditMetrics.warnings.add(warning);
     }
 
     private String normalizeLoadStrategy(String loadStrategy) {
