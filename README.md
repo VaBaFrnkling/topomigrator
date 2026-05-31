@@ -19,6 +19,7 @@ configs/datasources.yaml
 changelogs/tables/*.yaml
 flows/MainMigration.json
 run-topomigrator.sh
+scripts/nifi-ready.sh
 ```
 
 ## Configuracion
@@ -40,6 +41,11 @@ Variables obligatorias:
 - `TARGET_DB_JDBC_URL`
 - `TARGET_DB_USERNAME`
 - `TARGET_DB_PASSWORD`
+
+Variables opcionales del runner:
+
+- `NIFI_READY_TIMEOUT_SECONDS` para ampliar o reducir la espera maxima del readiness funcional de NiFi. Por defecto `360`.
+- `TOPOMIGRATOR_WAIT_TIMEOUT_SECONDS` para ampliar o reducir la espera maxima de finalizacion del contenedor `topomigrator`. Por defecto `14400`.
 
 Ejemplo:
 
@@ -68,14 +74,19 @@ El runner:
 - valida que todas las variables obligatorias esten definidas
 - valida `configs/` y `changelogs/`
 - valida `flows/MainMigration.json`
+- valida `scripts/nifi-ready.sh`
 - comprueba conectividad PostgreSQL con `psql`
-- ejecuta `docker compose up --build --abort-on-container-exit`
+- limpia el stack Docker Compose al inicio y al final
+- arranca `nifi` desde un estado limpio
+- espera a que NiFi autentique y responda a `https://nifi:8443/nifi-api`
+- arranca `topomigrator` cuando NiFi ya esta listo a nivel funcional
+- espera a que `topomigrator` termine y conserva logs de diagnostico si falla
 
 No crea usuarios, bases de datos ni reglas de red en PostgreSQL. Esa preparacion es externa al proyecto.
 
 ## Salidas
 
-La ejecucion genera `outputs/traces/summary.json`, trazas por tabla en `outputs/traces/tables/` y errores tecnicos en `outputs/errors/`.
+La ejecucion genera `outputs/logs/run-topomigrator-*.log`, `outputs/traces/summary.json`, trazas por tabla en `outputs/traces/tables/` y errores tecnicos en `outputs/errors/`.
 
 Si se detectan ciclos de dependencias, TopoMigrator ejecuta las tablas que tengan un orden valido, marca las tablas del ciclo como `FAILED` y las dependientes como `BLOCKED`. En ese caso no crea un error de orquestacion por el ciclo.
 
