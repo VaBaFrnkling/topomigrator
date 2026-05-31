@@ -47,6 +47,8 @@ Variables opcionales del runner:
 - `NIFI_READY_TIMEOUT_SECONDS` para ampliar o reducir la espera maxima del readiness funcional de NiFi. Por defecto `360`.
 - `TOPOMIGRATOR_WAIT_TIMEOUT_SECONDS` para ampliar o reducir la espera maxima de finalizacion del contenedor `topomigrator`. Por defecto `14400`.
 
+Docker Compose inyecta internamente `NIFI_BASE_URL` y `NIFI_HEALTHCHECK_URL` con la misma URL de NiFi API para mantener consistente el arranque y el readiness.
+
 Ejemplo:
 
 ```dotenv

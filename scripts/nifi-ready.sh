@@ -2,7 +2,22 @@
 
 set -euo pipefail
 
-base_url="${NIFI_HEALTHCHECK_URL:-https://127.0.0.1:8443/nifi-api}"
+resolve_nifi_host() {
+  local host="${NIFI_WEB_HTTPS_HOST:-${HOSTNAME:-nifi}}"
+
+  case "$host" in
+    ""|"0.0.0.0"|"::"|"[::]")
+      host="${HOSTNAME:-nifi}"
+      ;;
+  esac
+
+  printf '%s' "$host"
+}
+
+default_host="$(resolve_nifi_host)"
+default_port="${NIFI_WEB_HTTPS_PORT:-8443}"
+default_base_url="${NIFI_BASE_URL:-https://${default_host}:${default_port}/nifi-api}"
+base_url="${NIFI_HEALTHCHECK_URL:-$default_base_url}"
 base_url="${base_url%/}"
 
 username="${SINGLE_USER_CREDENTIALS_USERNAME:-${NIFI_USERNAME:-}}"

@@ -1,3 +1,5 @@
+x-nifi-api-url: &nifi_api_url https://nifi:8443/nifi-api
+
 services:
   topomigrator:
     build: .
@@ -10,7 +12,7 @@ services:
       - ./outputs:/app/outputs
       - ./changelogs:/app/changelogs
     environment:
-      NIFI_BASE_URL: https://nifi:8443/nifi-api
+      NIFI_BASE_URL: *nifi_api_url
       NIFI_USERNAME: ${NIFI_USERNAME:?NIFI_USERNAME no configurado}
       NIFI_PASSWORD: ${NIFI_PASSWORD:?NIFI_PASSWORD no configurado}
       MIGRATION_CONFIG_PATH: /app/configs/contract.yaml
@@ -37,6 +39,8 @@ services:
       NIFI_WEB_HTTPS_PORT: 8443
       NIFI_WEB_HTTPS_HOST: nifi
       NIFI_WEB_PROXY_HOST: nifi:8443,localhost:8443,127.0.0.1:8443
+      NIFI_BASE_URL: *nifi_api_url
+      NIFI_HEALTHCHECK_URL: *nifi_api_url
       SINGLE_USER_CREDENTIALS_USERNAME: ${NIFI_USERNAME:?NIFI_USERNAME no configurado}
       SINGLE_USER_CREDENTIALS_PASSWORD: ${NIFI_PASSWORD:?NIFI_PASSWORD no configurado}
     ports:
