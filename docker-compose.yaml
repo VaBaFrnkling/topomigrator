@@ -1,7 +1,6 @@
 services:
   topomigrator:
     build: .
-    container_name: topomigrator
     depends_on:
       nifi:
         condition: service_healthy
@@ -24,7 +23,7 @@ services:
       TARGET_DB_JDBC_URL: ${TARGET_DB_JDBC_URL:?TARGET_DB_JDBC_URL no configurado}
       TARGET_DB_USERNAME: ${TARGET_DB_USERNAME:?TARGET_DB_USERNAME no configurado}
       TARGET_DB_PASSWORD: ${TARGET_DB_PASSWORD:?TARGET_DB_PASSWORD no configurado}
-    restart: on-failure:3
+    restart: "no"
     init: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -33,7 +32,6 @@ services:
 
   nifi:
     image: apache/nifi:2.9.0
-    container_name: nifi
     hostname: nifi
     environment:
       NIFI_WEB_HTTPS_PORT: 8443
@@ -46,15 +44,17 @@ services:
     volumes:
       - ./src/main/resources/db/drivers:/opt/nifi/drivers
       - ./src/main/resources/nifi-logback.xml:/opt/nifi/nifi-current/conf/logback.xml:ro
+      - ./scripts/nifi-ready.sh:/opt/nifi/scripts/nifi-ready.sh:ro
       - ./outputs/logs:/opt/nifi/nifi-current/logs
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/$(hostname)/8443'"]
-      interval: 10s
-      timeout: 5s
-      retries: 18
-      start_period: 90s
-    restart: unless-stopped
-    stop_grace_period: 1m
+      test: ["CMD", "bash", "/opt/nifi/scripts/nifi-ready.sh"]
+      interval: 5s
+      timeout: 15s
+      retries: 24
+      start_period: 120s
+    restart: "no"
+    init: true
+    stop_grace_period: 2m
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
