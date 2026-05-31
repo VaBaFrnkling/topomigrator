@@ -249,19 +249,54 @@ public class ExecutionEngineQualityTest {
     }
 
     @Test
-    public void executeMigrationFailsWhenAuditCountersMismatch() throws Exception {
+    public void executeMigrationAllowsIdempotentUpsertReexecutionWithoutNetNewRows() throws Exception {
+        RecordingNiFiClient nifi = new RecordingNiFiClient();
+        RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
+        CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(20L, 20L)));
+        EngineHarness harness = engine(nifi, traces, metrics);
+        MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
+
+        harness.engine.executeMigration(List.of(new TableNode("customers")), contract, List.of());
+
+        assertEquals(1, traces.summary.tables.successful);
+        assertEquals("SUCCESS", traces.tableTraces.get(0).status);
+        assertEquals("CONSISTENT", traces.tableTraces.get(0).auditMetrics.consistencyStatus);
+        assertEquals("UPSERT_NO_NET_CHANGE", traces.tableTraces.get(0).auditMetrics.outcome);
+        assertEquals(20L, traces.tableTraces.get(0).recordsProcessed);
+        assertEquals("UPSERT_NO_NET_CHANGE", traces.summary.tableExecutionDetails.get(0).auditOutcome);
+    }
+
+    @Test
+    public void executeMigrationTreatsPartialTargetGrowthAsValidUpsertWithUpdates() throws Exception {
+        RecordingNiFiClient nifi = new RecordingNiFiClient();
+        RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
+        CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(10L, 22L)));
+        EngineHarness harness = engine(nifi, traces, metrics);
+        MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
+
+        harness.engine.executeMigration(List.of(new TableNode("customers")), contract, List.of());
+
+        assertEquals(1, traces.summary.tables.successful);
+        assertEquals("SUCCESS", traces.tableTraces.get(0).status);
+        assertEquals("CONSISTENT", traces.tableTraces.get(0).auditMetrics.consistencyStatus);
+        assertEquals("UPSERT_INSERTS_AND_UPDATES", traces.tableTraces.get(0).auditMetrics.outcome);
+        assertEquals(20L, traces.tableTraces.get(0).recordsProcessed);
+    }
+
+    @Test
+    public void executeMigrationFailsWhenAppendModeLeavesInconsistentTargetDelta() throws Exception {
         RecordingNiFiClient nifi = new RecordingNiFiClient();
         RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
         CountingMetricsService metrics = new CountingMetricsService(Map.of("customers", 20L), Map.of("customers", List.of(0L, 12L)));
         EngineHarness harness = engine(nifi, traces, metrics);
-        MigrationContract contract = QualityTestData.contractWith(QualityTestData.fullTable("customers"));
+        MigrationContract contract = QualityTestData.contractWith(QualityTestData.incrementalAppendTable("customers"));
 
         IllegalStateException error = assertThrows(IllegalStateException.class,
                 () -> harness.engine.executeMigration(List.of(new TableNode("customers")), contract, List.of()));
 
         assertTrue(error.getMessage().contains("tabla(s) fallida(s)"));
         assertEquals("FAILED", traces.tableTraces.get(0).status);
-        assertEquals("MISMATCH", traces.tableTraces.get(0).auditMetrics.consistencyStatus);
+        assertEquals("INCONSISTENT", traces.tableTraces.get(0).auditMetrics.consistencyStatus);
         assertTrue(traces.tableTraces.get(0).errors.get(0).contains("inconsistencia"));
     }
 

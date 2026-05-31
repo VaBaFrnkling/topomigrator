@@ -49,6 +49,7 @@ public class TableTrace {
         public Long targetRowsAfter;
         public Long targetNetDelta;
         public String consistencyStatus;
+        public String outcome;
         public List<String> warnings;
     }
 }

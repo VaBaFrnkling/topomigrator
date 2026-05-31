@@ -42,11 +42,23 @@ public class ExecutionEngine {
     static final String CLEANUP_STATUS_SKIPPED = "SKIPPED";
     static final String CLEANUP_PHASE_PROCESS_GROUP = "PROCESS_GROUP_CLEANUP";
 
-    private static final String CONSISTENCY_MATCH = "MATCH";
-    private static final String CONSISTENCY_MISMATCH = "MISMATCH";
+    private static final String AUDIT_WRITE_MODE_INSERT = "INSERT";
+    private static final String AUDIT_WRITE_MODE_UPSERT = "UPSERT";
+    private static final String CONSISTENCY_CONSISTENT = "CONSISTENT";
+    private static final String CONSISTENCY_INCONSISTENT = "INCONSISTENT";
     private static final String CONSISTENCY_SOURCE_ONLY = "SOURCE_ONLY";
     private static final String CONSISTENCY_TARGET_DELTA_ONLY = "TARGET_DELTA_ONLY";
     private static final String CONSISTENCY_UNAVAILABLE = "UNAVAILABLE";
+    private static final String OUTCOME_INSERT_APPLIED = "INSERT_APPLIED";
+    private static final String OUTCOME_UPSERT_INSERTS_ONLY = "UPSERT_INSERTS_ONLY";
+    private static final String OUTCOME_UPSERT_INSERTS_AND_UPDATES = "UPSERT_INSERTS_AND_UPDATES";
+    private static final String OUTCOME_UPSERT_NO_NET_CHANGE = "UPSERT_NO_NET_CHANGE";
+    private static final String OUTCOME_NO_SOURCE_ROWS = "NO_SOURCE_ROWS";
+    private static final String OUTCOME_SOURCE_COUNT_ONLY = "SOURCE_COUNT_ONLY";
+    private static final String OUTCOME_TARGET_DELTA_ONLY = "TARGET_DELTA_ONLY";
+    private static final String OUTCOME_UNAVAILABLE = "UNAVAILABLE";
+    private static final String OUTCOME_EXECUTION_FAILED = "EXECUTION_FAILED";
+    private static final String OUTCOME_BLOCKED = "BLOCKED";
 
     private final NiFiClient nifiClient;
     private final TraceabilityManager traceManager;
@@ -292,7 +304,7 @@ public class ExecutionEngine {
             Long targetRowsAfter = safelyCountTargetRows(contract, tableConfig, tableTrace);
             tableTrace.auditMetrics.targetRowsAfter = targetRowsAfter;
             tableTrace.auditMetrics.targetNetDelta = computeNetDelta(targetRowsBefore, targetRowsAfter);
-            tableTrace.recordsProcessed = resolveAuditedProcessedRecords(sourceSelectedRows, tableTrace.auditMetrics.targetNetDelta, tableTrace);
+            tableTrace.recordsProcessed = resolveAuditedProcessedRecords(tableConfig, sourceSelectedRows, tableTrace);
 
             updateIncrementalStateIfNeeded(contract, tableName, tableConfig, effectiveIncrementalStartValue, tableTrace);
             setMigrationStatus(tableTrace, STATUS_SUCCESS);
@@ -600,6 +612,7 @@ public class ExecutionEngine {
                     "No se creó Process Group temporal porque la tabla no era ejecutable.");
             setMigrationStatus(tableTrace, status);
             tableTrace.auditMetrics.consistencyStatus = status;
+            tableTrace.auditMetrics.outcome = status;
             tableTrace.auditMetrics.warnings.add(reason);
 
             if (STATUS_FAILED.equals(status)) {
@@ -716,6 +729,7 @@ public class ExecutionEngine {
         setMigrationStatus(tableTrace, STATUS_BLOCKED);
         tableTrace.recordsProcessed = 0L;
         tableTrace.auditMetrics.consistencyStatus = STATUS_BLOCKED;
+        tableTrace.auditMetrics.outcome = OUTCOME_BLOCKED;
         tableTrace.auditMetrics.warnings.add("Tabla no ejecutada por fallo previo en dependencias padre: " + blockingParents);
         summary.blockedTables.add(tableName);
         summary.tables.blocked++;
@@ -732,6 +746,9 @@ public class ExecutionEngine {
         if (tableTrace.auditMetrics != null) {
             if (tableTrace.auditMetrics.consistencyStatus == null) {
                 tableTrace.auditMetrics.consistencyStatus = STATUS_FAILED;
+            }
+            if (tableTrace.auditMetrics.outcome == null) {
+                tableTrace.auditMetrics.outcome = OUTCOME_EXECUTION_FAILED;
             }
             tableTrace.auditMetrics.warnings.add("La tabla falló durante la ejecución: " + sanitizedMessage);
         }
@@ -757,7 +774,7 @@ public class ExecutionEngine {
         tableTrace.timing = new Timing();
         tableTrace.timing.startTime = LocalDateTime.now().format(formatter);
         tableTrace.auditMetrics = new TableTrace.AuditMetrics();
-        tableTrace.auditMetrics.strategy = "SOURCE_QUERY_COUNT_WITH_TARGET_DELTA_VALIDATION";
+        tableTrace.auditMetrics.strategy = "WRITE_MODE_AWARE_SOURCE_COUNT_WITH_TARGET_STATE_VALIDATION";
         tableTrace.auditMetrics.warnings = new ArrayList<>();
         tableTrace.cleanup = new TableTrace.CleanupInfo();
         tableTrace.cleanup.status = CLEANUP_STATUS_PENDING;
@@ -798,6 +815,7 @@ public class ExecutionEngine {
         s.sourceSelectedRecords = tableTrace.auditMetrics != null ? tableTrace.auditMetrics.sourceSelectedRecords : null;
         s.targetNetDeltaRecords = tableTrace.auditMetrics != null ? tableTrace.auditMetrics.targetNetDelta : null;
         s.auditConsistencyStatus = tableTrace.auditMetrics != null ? tableTrace.auditMetrics.consistencyStatus : null;
+        s.auditOutcome = tableTrace.auditMetrics != null ? tableTrace.auditMetrics.outcome : null;
         return s;
     }
 
@@ -845,14 +863,17 @@ public class ExecutionEngine {
         return after - before;
     }
 
-    private long resolveAuditedProcessedRecords(Long sourceSelectedRows, Long targetNetDelta, TableTrace tableTrace) {
-        finalizeAuditConsistency(tableTrace, sourceSelectedRows, targetNetDelta);
+    private long resolveAuditedProcessedRecords(TableMigration tableConfig, Long sourceSelectedRows, TableTrace tableTrace) {
+        AuditEvaluation evaluation = finalizeAuditConsistency(tableConfig, tableTrace, sourceSelectedRows);
 
-        if (tableTrace.auditMetrics != null && CONSISTENCY_MISMATCH.equals(tableTrace.auditMetrics.consistencyStatus)) {
-            throw new IllegalStateException("La auditoria detecto inconsistencia entre origen y destino. "
-                    + "sourceSelectedRecords=" + sourceSelectedRows + ", targetNetDelta=" + targetNetDelta);
+        if (evaluation.isInconsistent()) {
+            throw new IllegalStateException("La auditoria detecto una inconsistencia real entre origen y destino. "
+                    + evaluation.message);
         }
 
+        Long targetNetDelta = tableTrace != null && tableTrace.auditMetrics != null
+                ? tableTrace.auditMetrics.targetNetDelta
+                : null;
         if (sourceSelectedRows != null) {
             return sourceSelectedRows;
         }
@@ -862,35 +883,167 @@ public class ExecutionEngine {
         return 0L;
     }
 
-    private void finalizeAuditConsistency(TableTrace tableTrace, Long sourceSelectedRows, Long targetNetDelta) {
-        if (tableTrace.auditMetrics == null) {
-            return;
+    private AuditEvaluation finalizeAuditConsistency(TableMigration tableConfig,
+                                                     TableTrace tableTrace,
+                                                     Long sourceSelectedRows) {
+        if (tableTrace == null || tableTrace.auditMetrics == null) {
+            return new AuditEvaluation(CONSISTENCY_UNAVAILABLE, OUTCOME_UNAVAILABLE, null);
         }
 
+        TableTrace.AuditMetrics metrics = tableTrace.auditMetrics;
+        String writeMode = resolveAuditWriteMode(tableConfig);
+        Long targetRowsBefore = metrics.targetRowsBefore;
+        Long targetRowsAfter = metrics.targetRowsAfter;
+        Long targetNetDelta = metrics.targetNetDelta;
+
+        AuditEvaluation evaluation = evaluateAudit(writeMode, sourceSelectedRows, targetRowsBefore, targetRowsAfter, targetNetDelta);
+        metrics.consistencyStatus = evaluation.consistencyStatus;
+        metrics.outcome = evaluation.outcome;
+        if (evaluation.message != null && metrics.warnings != null) {
+            metrics.warnings.add(evaluation.message);
+        }
+        return evaluation;
+    }
+
+    private AuditEvaluation evaluateAudit(String writeMode,
+                                          Long sourceSelectedRows,
+                                          Long targetRowsBefore,
+                                          Long targetRowsAfter,
+                                          Long targetNetDelta) {
+        String auditContext = buildAuditContext(writeMode, sourceSelectedRows, targetRowsBefore, targetRowsAfter, targetNetDelta);
+
         if (sourceSelectedRows != null && targetNetDelta != null) {
-            if (sourceSelectedRows.equals(targetNetDelta)) {
-                tableTrace.auditMetrics.consistencyStatus = CONSISTENCY_MATCH;
-            } else {
-                tableTrace.auditMetrics.consistencyStatus = CONSISTENCY_MISMATCH;
-                tableTrace.auditMetrics.warnings.add(
-                        "La selección en origen (" + sourceSelectedRows + ") no coincide con el delta neto en destino (" + targetNetDelta + "). " +
-                                "Se usa sourceSelectedRecords como métrica principal y targetNetDelta solo como validación auxiliar."
+            if (sourceSelectedRows == 0L && targetNetDelta == 0L) {
+                return new AuditEvaluation(CONSISTENCY_CONSISTENT, OUTCOME_NO_SOURCE_ROWS, null);
+            }
+            if (sourceSelectedRows == 0L) {
+                return new AuditEvaluation(
+                        CONSISTENCY_INCONSISTENT,
+                        OUTCOME_UNAVAILABLE,
+                        "La consulta de origen no selecciono filas, pero el destino cambio. " + auditContext
                 );
             }
-            return;
+            if (targetNetDelta < 0L) {
+                return new AuditEvaluation(
+                        CONSISTENCY_INCONSISTENT,
+                        OUTCOME_UNAVAILABLE,
+                        "El numero de filas en destino disminuyo tras la ejecucion, algo incompatible con una carga INSERT/UPSERT. " + auditContext
+                );
+            }
+
+            if (AUDIT_WRITE_MODE_INSERT.equals(writeMode)) {
+                if (sourceSelectedRows.equals(targetNetDelta)) {
+                    return new AuditEvaluation(CONSISTENCY_CONSISTENT, OUTCOME_INSERT_APPLIED, null);
+                }
+                return new AuditEvaluation(
+                        CONSISTENCY_INCONSISTENT,
+                        OUTCOME_UNAVAILABLE,
+                        "En modo INSERT el delta neto en destino debe coincidir exactamente con las filas seleccionadas en origen. " + auditContext
+                );
+            }
+
+            if (targetNetDelta > sourceSelectedRows) {
+                return new AuditEvaluation(
+                        CONSISTENCY_INCONSISTENT,
+                        OUTCOME_UNAVAILABLE,
+                        "El delta neto en destino supera las filas seleccionadas en origen, algo incompatible con una ejecucion UPSERT determinista. " + auditContext
+                );
+            }
+            if (targetNetDelta.equals(sourceSelectedRows)) {
+                return new AuditEvaluation(CONSISTENCY_CONSISTENT, OUTCOME_UPSERT_INSERTS_ONLY, null);
+            }
+            if (targetNetDelta > 0L) {
+                return new AuditEvaluation(
+                        CONSISTENCY_CONSISTENT,
+                        OUTCOME_UPSERT_INSERTS_AND_UPDATES,
+                        "Se detectaron menos filas nuevas netas que filas seleccionadas en origen; esto es compatible con UPSERT sobre datos parcialmente existentes. "
+                                + auditContext
+                );
+            }
+            return new AuditEvaluation(
+                    CONSISTENCY_CONSISTENT,
+                    OUTCOME_UPSERT_NO_NET_CHANGE,
+                    "No hubo nuevas filas netas en destino; en modo UPSERT esto es compatible con reejecucion idempotente o con actualizaciones in-place. "
+                            + auditContext
+            );
         }
 
         if (sourceSelectedRows != null) {
-            tableTrace.auditMetrics.consistencyStatus = CONSISTENCY_SOURCE_ONLY;
-            return;
+            return new AuditEvaluation(
+                    CONSISTENCY_SOURCE_ONLY,
+                    sourceSelectedRows == 0L ? OUTCOME_NO_SOURCE_ROWS : OUTCOME_SOURCE_COUNT_ONLY,
+                    "Solo se pudo validar la seleccion de origen; no hay medicion fiable del estado final del destino. " + auditContext
+            );
         }
 
         if (targetNetDelta != null) {
-            tableTrace.auditMetrics.consistencyStatus = CONSISTENCY_TARGET_DELTA_ONLY;
-            return;
+            return new AuditEvaluation(
+                    CONSISTENCY_TARGET_DELTA_ONLY,
+                    OUTCOME_TARGET_DELTA_ONLY,
+                    "Solo se pudo validar el delta neto en destino; no hay medicion fiable de la seleccion de origen. " + auditContext
+            );
         }
 
-        tableTrace.auditMetrics.consistencyStatus = CONSISTENCY_UNAVAILABLE;
+        return new AuditEvaluation(
+                CONSISTENCY_UNAVAILABLE,
+                OUTCOME_UNAVAILABLE,
+                "No se pudieron obtener metricas suficientes para auditar la consistencia origen/destino. " + auditContext
+        );
+    }
+
+    private String resolveAuditWriteMode(TableMigration tableConfig) {
+        if (tableConfig == null) {
+            return AUDIT_WRITE_MODE_UPSERT;
+        }
+
+        String migrationType = tableConfig.getMigrationType() == null
+                ? "full"
+                : tableConfig.getMigrationType().trim().toLowerCase(Locale.ROOT);
+        if ("full".equals(migrationType)) {
+            return AUDIT_WRITE_MODE_UPSERT;
+        }
+
+        if ("incremental".equals(migrationType)) {
+            String loadStrategy = tableConfig.getIncrementalConfig() != null
+                    ? tableConfig.getIncrementalConfig().getLoadStrategy()
+                    : null;
+            String normalizedLoadStrategy = loadStrategy == null || loadStrategy.isBlank()
+                    ? "upsert"
+                    : loadStrategy.trim().toLowerCase(Locale.ROOT);
+            if ("append".equals(normalizedLoadStrategy) || "append_only".equals(normalizedLoadStrategy)) {
+                return AUDIT_WRITE_MODE_INSERT;
+            }
+        }
+
+        return AUDIT_WRITE_MODE_UPSERT;
+    }
+
+    private String buildAuditContext(String writeMode,
+                                     Long sourceSelectedRows,
+                                     Long targetRowsBefore,
+                                     Long targetRowsAfter,
+                                     Long targetNetDelta) {
+        return "writeMode=" + writeMode
+                + ", sourceSelectedRecords=" + sourceSelectedRows
+                + ", targetRowsBefore=" + targetRowsBefore
+                + ", targetRowsAfter=" + targetRowsAfter
+                + ", targetNetDelta=" + targetNetDelta;
+    }
+
+    private static final class AuditEvaluation {
+        private final String consistencyStatus;
+        private final String outcome;
+        private final String message;
+
+        private AuditEvaluation(String consistencyStatus, String outcome, String message) {
+            this.consistencyStatus = consistencyStatus;
+            this.outcome = outcome;
+            this.message = message;
+        }
+
+        private boolean isInconsistent() {
+            return CONSISTENCY_INCONSISTENT.equals(consistencyStatus);
+        }
     }
 
     private TableMigration resolveTableConfig(MigrationContract contract, String tableName) {

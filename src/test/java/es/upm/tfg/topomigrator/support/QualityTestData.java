@@ -69,6 +69,12 @@ public final class QualityTestData {
         return table;
     }
 
+    public static TableMigration incrementalAppendTable(String tableName) {
+        TableMigration table = incrementalTable(tableName);
+        table.getIncrementalConfig().setLoadStrategy("append");
+        return table;
+    }
+
     public static TableMigration inactiveTable(String tableName) {
         TableMigration table = fullTable(tableName);
         table.setEnabled(false);

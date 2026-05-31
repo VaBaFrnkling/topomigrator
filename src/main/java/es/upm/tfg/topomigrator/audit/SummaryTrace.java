@@ -52,5 +52,6 @@ public class SummaryTrace {
         public Long sourceSelectedRecords;
         public Long targetNetDeltaRecords;
         public String auditConsistencyStatus;
+        public String auditOutcome;
     }
 }
