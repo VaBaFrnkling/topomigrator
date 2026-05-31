@@ -73,6 +73,12 @@ El runner:
 
 No crea usuarios, bases de datos ni reglas de red en PostgreSQL. Esa preparacion es externa al proyecto.
 
+## Salidas
+
+La ejecucion genera `outputs/traces/summary.json`, trazas por tabla en `outputs/traces/tables/` y errores tecnicos en `outputs/errors/`.
+
+Si se detectan ciclos de dependencias, TopoMigrator ejecuta las tablas que tengan un orden valido, marca las tablas del ciclo como `FAILED` y las dependientes como `BLOCKED`. En ese caso no crea un error de orquestacion por el ciclo.
+
 ## Build y tests
 
 ```bash

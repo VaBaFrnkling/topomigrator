@@ -1,7 +1,7 @@
 package es.upm.tfg.topomigrator;
 
-import es.upm.tfg.topomigrator.exceptions.CycleDetectedException;
 import es.upm.tfg.topomigrator.model.MigrationContract;
+import es.upm.tfg.topomigrator.orchestration.dependency.TableNode;
 import es.upm.tfg.topomigrator.support.QualityTestData;
 import org.junit.Test;
 
@@ -12,16 +12,19 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
-import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertEquals;
 
 public class AppQualityTest {
 
     @Test
-    public void resolveDependencyPlanFailsWithCycleDetectedBeforeLiquibase() {
+    public void resolveDependencyPlanBuildsBestEffortPlanForCycles() throws Exception {
         MigrationContract contract = QualityTestData.contractWith(
+                QualityTestData.fullTable("projects"),
                 QualityTestData.fullTable("tasks"),
-                QualityTestData.fullTable("task_links")
+                QualityTestData.fullTable("task_links"),
+                QualityTestData.fullTable("task_assignments")
         );
         Connection connection = connection(List.of(
                 Map.of(
@@ -35,10 +38,29 @@ public class AppQualityTest {
                         "PKTABLE_NAME", "task_links",
                         "FKTABLE_SCHEM", "public",
                         "FKTABLE_NAME", "tasks"
+                ),
+                Map.of(
+                        "PKTABLE_SCHEM", "public",
+                        "PKTABLE_NAME", "tasks",
+                        "FKTABLE_SCHEM", "public",
+                        "FKTABLE_NAME", "task_assignments"
                 )
         ));
 
-        assertThrows(CycleDetectedException.class, () -> App.resolveDependencyPlan(contract, ignored -> connection));
+        App.DependencyPlan plan = App.resolveDependencyPlan(contract, ignored -> connection);
+
+        assertEquals(List.of("projects"), tableNames(plan.getExecutionOrder()));
+        assertEquals(List.of("task_links", "tasks"), tableNames(plan.getCyclicTables()));
+        assertEquals(List.of("task_assignments"), tableNames(plan.getBlockedTablesByCycle()));
+        assertEquals(List.of("projects"), App.filterContractForExecutableTables(contract, plan.getExecutionOrder())
+                .getTables()
+                .keySet()
+                .stream()
+                .collect(Collectors.toList()));
+    }
+
+    private static List<String> tableNames(List<TableNode> tableNodes) {
+        return tableNodes.stream().map(TableNode::getName).collect(Collectors.toList());
     }
 
     private static Connection connection(List<Map<String, Object>> importedKeys) {

@@ -3,12 +3,6 @@ package es.upm.tfg.topomigrator.orchestration.dependency;
 import java.util.Objects;
 import java.util.Locale;
 
-/**
- * Representa una dependencia de clave foránea entre dos tablas.
- * 
- * Si una tabla 'pedidos' tiene una FK apuntando a 'clientes', 
- * entonces 'clientes' es la tabla padre y 'pedidos' es la tabla dependiente.
- */
 public class ForeignKeyDependency {
     private final String parentTable;
     private final String dependentTable;

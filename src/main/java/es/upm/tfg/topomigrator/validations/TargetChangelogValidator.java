@@ -17,10 +17,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
-/**
- * Validates that every active target table has a Liquibase changelog with the
- * required file name and a createTable entry for that target table.
- */
 public class TargetChangelogValidator {
 
     private static final Logger log = LoggerFactory.getLogger(TargetChangelogValidator.class);

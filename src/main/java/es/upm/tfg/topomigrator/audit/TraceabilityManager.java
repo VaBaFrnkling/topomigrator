@@ -12,10 +12,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-/**
- * Gestor encargado de serializar e inyectar la información de auditoría
- * del estado de la migración utilizando la librería GSON.
- */
 public class TraceabilityManager {
 
     private static final Logger log = LoggerFactory.getLogger(TraceabilityManager.class);
@@ -26,7 +22,6 @@ public class TraceabilityManager {
     public TraceabilityManager() {
         this.gson = new GsonBuilder().setPrettyPrinting().create();
 
-        // Determinar directorios, por defecto dentro de un output mapeado en Docker
         this.tracesBaseDir = Paths.get("outputs", "traces").toAbsolutePath();
         this.tracesTablesDir = this.tracesBaseDir.resolve("tables");
 
@@ -42,9 +37,6 @@ public class TraceabilityManager {
         }
     }
 
-    /**
-     * Escribe un fichero JSON individual de auditoría para una tabla recién migrada.
-     */
     public void writeTableTrace(TableTrace trace) {
         if (trace == null || trace.table == null || trace.table.target == null) {
             log.error("El trace de tabla proporcionado es nulo o incompleto. No se puede guardar.");
@@ -69,9 +61,6 @@ public class TraceabilityManager {
         }
     }
 
-    /**
-     * Escribe el fichero JSON sumatorio/global de la ejecución completa de las tablas.
-     */
     public void writeSummary(SummaryTrace summary) {
         if (summary == null) {
             log.error("El summary proporcionado es nulo. No se puede guardar.");

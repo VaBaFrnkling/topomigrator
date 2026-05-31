@@ -20,11 +20,43 @@ public class DependencyResolver {
     private static final Logger logger = LoggerFactory.getLogger(DependencyResolver.class);
 
     public List<TableNode> resolveExecutionOrder(Set<String> includedTables, List<ForeignKeyDependency> dependencies) {
-        logger.info("Iniciando resolución de orden topológico para {} tablas...", includedTables != null ? includedTables.size() : 0);
-        
-        if (includedTables == null || includedTables.isEmpty()) {
-            logger.warn("El conjunto de tablas incluidas está vacío o es nulo. Se aborta el cálculo.");
+        logger.info("Iniciando resolucion de orden topologico para {} tablas...", includedTables != null ? includedTables.size() : 0);
+        DependencyGraph graph = buildGraph(includedTables, dependencies);
+        if (graph.getInDegree().isEmpty()) {
             return Collections.emptyList();
+        }
+        return applyKahnsAlgorithm(graph);
+    }
+
+    public BestEffortPlan resolveBestEffortPlan(Set<String> includedTables, List<ForeignKeyDependency> dependencies) {
+        logger.info("Iniciando resolucion best-effort de dependencias para {} tablas...", includedTables != null ? includedTables.size() : 0);
+        DependencyGraph graph = buildGraph(includedTables, dependencies);
+        if (graph.getInDegree().isEmpty()) {
+            return new BestEffortPlan(Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+        }
+
+        KahnResult result = runKahnsAlgorithm(graph);
+        if (result.executionOrder.size() == graph.getInDegree().size()) {
+            return new BestEffortPlan(result.executionOrder, Collections.emptyList(), Collections.emptyList());
+        }
+
+        Set<TableNode> cyclicNodes = findNodesParticipatingInCycles(graph, result.remainingNodes);
+        Set<TableNode> blockedNodes = new LinkedHashSet<>(result.remainingNodes);
+        blockedNodes.removeAll(cyclicNodes);
+
+        List<TableNode> cyclicTables = sortNodes(cyclicNodes);
+        List<TableNode> blockedTables = sortNodes(blockedNodes);
+
+        logger.warn("Plan best-effort generado. Ejecutables={}, ciclo={}, bloqueadas={}",
+                result.executionOrder, cyclicTables, blockedTables);
+
+        return new BestEffortPlan(result.executionOrder, cyclicTables, blockedTables);
+    }
+
+    private DependencyGraph buildGraph(Set<String> includedTables, List<ForeignKeyDependency> dependencies) {
+        if (includedTables == null || includedTables.isEmpty()) {
+            logger.warn("El conjunto de tablas incluidas esta vacio o es nulo. Se aborta el calculo.");
+            return new DependencyGraph();
         }
 
         Set<String> normalizedIncluded = includedTables.stream()
@@ -58,14 +90,16 @@ public class DependencyResolver {
                     graph.addDependency(parent, dependent);
                     validEdges++;
                 } else {
-                    logger.debug("Descartada dependencia foránea hacia tabla no incluida: {} -> {}", dep.getParentTable(), dep.getDependentTable());
+                    logger.debug("Descartada dependencia foranea hacia tabla no incluida: {} -> {}",
+                            dep.getParentTable(), dep.getDependentTable());
                 }
             }
         }
-        
-        logger.info("Constructor de DAG finalizado internamente. Nodos instanciados: {}, Aristas válidas inyectadas: {}", normalizedIncluded.size(), validEdges);
 
-        return applyKahnsAlgorithm(graph);
+        logger.info("Grafo de dependencias construido. Nodos: {}, aristas validas: {}",
+                normalizedIncluded.size(), validEdges);
+
+        return graph;
     }
 
     private String normalizeTableId(String tableId) {
@@ -76,12 +110,30 @@ public class DependencyResolver {
     }
 
     private List<TableNode> applyKahnsAlgorithm(DependencyGraph graph) {
-        logger.debug("Aplicando procesador matemático de la capa (algoritmo de Kahn)...");
+        logger.debug("Aplicando algoritmo de Kahn para resolver el orden topologico.");
+        KahnResult result = runKahnsAlgorithm(graph);
+
+        if (result.executionOrder.size() != graph.getInDegree().size()) {
+            List<String> cyclicTables = result.remainingNodes.stream()
+                    .map(TableNode::getName)
+                    .collect(Collectors.toList());
+
+            String cycleMsg = "Se ha detectado una dependencia ciclica entre las tablas: " + String.join(", ", cyclicTables);
+            logger.error("No se puede generar un DAG valido. {}", cycleMsg);
+            throw new CycleDetectedException("No se pudo hallar un orden valido. " + cycleMsg);
+        }
+
+        logger.info("Ordenamiento finalizado correctamente. Cadena de delegacion resultante: {}",
+                result.executionOrder.stream().map(TableNode::getName).collect(Collectors.joining(" -> ")));
+
+        return result.executionOrder;
+    }
+
+    private KahnResult runKahnsAlgorithm(DependencyGraph graph) {
         Map<TableNode, Integer> inDegree = new HashMap<>(graph.getInDegree());
         Map<TableNode, Set<TableNode>> adjacencyList = graph.getAdjacencyList();
-        
+
         List<TableNode> executionOrder = new ArrayList<>();
-        
         PriorityQueue<TableNode> readyQueue = new PriorityQueue<>();
 
         for (Map.Entry<TableNode, Integer> entry : inDegree.entrySet()) {
@@ -105,20 +157,97 @@ public class DependencyResolver {
             }
         }
 
-        if (executionOrder.size() != inDegree.size()) {
-            List<String> cyclicTables = inDegree.entrySet().stream()
-                    .filter(entry -> entry.getValue() > 0)
-                    .map(entry -> entry.getKey().getName())
-                    .collect(Collectors.toList());
-            
-            String cycleMsg = "Se ha detectado una dependencia cíclica entre las tablas: " + String.join(", ", cyclicTables);
-            logger.error("No se puede generar un DAG valido. {}", cycleMsg);
-            throw new CycleDetectedException("No se pudo hallar un orden válido. " + cycleMsg);
+        Set<TableNode> processed = new LinkedHashSet<>(executionOrder);
+        Set<TableNode> remaining = inDegree.keySet().stream()
+                .filter(node -> !processed.contains(node))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+
+        return new KahnResult(executionOrder, remaining);
+    }
+
+    private Set<TableNode> findNodesParticipatingInCycles(DependencyGraph graph, Set<TableNode> candidates) {
+        Set<TableNode> cyclicNodes = new LinkedHashSet<>();
+        for (TableNode candidate : candidates) {
+            Set<TableNode> reachable = new LinkedHashSet<>();
+            collectReachable(candidate, graph.getAdjacencyList(), candidates, reachable);
+            for (TableNode other : reachable) {
+                if (!candidate.equals(other)
+                        && pathExists(other, candidate, graph.getAdjacencyList(), candidates, new LinkedHashSet<>())) {
+                    cyclicNodes.add(candidate);
+                    cyclicNodes.add(other);
+                }
+            }
+        }
+        return cyclicNodes;
+    }
+
+    private void collectReachable(TableNode current,
+                                  Map<TableNode, Set<TableNode>> adjacencyList,
+                                  Set<TableNode> allowedNodes,
+                                  Set<TableNode> visited) {
+        for (TableNode neighbor : adjacencyList.getOrDefault(current, Collections.emptySet())) {
+            if (allowedNodes.contains(neighbor) && visited.add(neighbor)) {
+                collectReachable(neighbor, adjacencyList, allowedNodes, visited);
+            }
+        }
+    }
+
+    private boolean pathExists(TableNode current,
+                               TableNode target,
+                               Map<TableNode, Set<TableNode>> adjacencyList,
+                               Set<TableNode> allowedNodes,
+                               Set<TableNode> visited) {
+        if (current.equals(target)) {
+            return true;
+        }
+        if (!visited.add(current)) {
+            return false;
+        }
+        for (TableNode neighbor : adjacencyList.getOrDefault(current, Collections.emptySet())) {
+            if (allowedNodes.contains(neighbor) && pathExists(neighbor, target, adjacencyList, allowedNodes, visited)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<TableNode> sortNodes(Set<TableNode> nodes) {
+        List<TableNode> sorted = new ArrayList<>(nodes);
+        Collections.sort(sorted);
+        return sorted;
+    }
+
+    private static final class KahnResult {
+        private final List<TableNode> executionOrder;
+        private final Set<TableNode> remainingNodes;
+
+        private KahnResult(List<TableNode> executionOrder, Set<TableNode> remainingNodes) {
+            this.executionOrder = executionOrder;
+            this.remainingNodes = remainingNodes;
+        }
+    }
+
+    public static final class BestEffortPlan {
+        private final List<TableNode> executableOrder;
+        private final List<TableNode> cyclicTables;
+        private final List<TableNode> blockedTables;
+
+        private BestEffortPlan(List<TableNode> executableOrder, List<TableNode> cyclicTables, List<TableNode> blockedTables) {
+            this.executableOrder = executableOrder;
+            this.cyclicTables = cyclicTables;
+            this.blockedTables = blockedTables;
         }
 
-        logger.info("Ordenamiento finalizado correctamente. Cadena de delegación resultante: {}", 
-                executionOrder.stream().map(TableNode::getName).collect(Collectors.joining(" -> ")));
+        public List<TableNode> getExecutableOrder() {
+            return executableOrder;
+        }
 
-        return executionOrder;
+        public List<TableNode> getCyclicTables() {
+            return cyclicTables;
+        }
+
+        public List<TableNode> getBlockedTables() {
+            return blockedTables;
+        }
     }
 }

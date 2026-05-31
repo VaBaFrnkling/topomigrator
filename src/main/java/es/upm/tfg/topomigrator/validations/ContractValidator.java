@@ -13,24 +13,11 @@ import java.nio.file.Path;
 import java.io.IOException;
 import java.util.regex.Pattern;
 
-/**
- * Clase para centralizar las validaciones de las reglas, formato y el 
- * orden estructural del fichero contract.yaml tras su conversión a objeto.
- */
 public class ContractValidator {
     
     private static final Logger log = LoggerFactory.getLogger(ContractValidator.class);
     private static final Pattern SQL_IDENTIFIER = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
-    /**
-     * Punto de entrada principal para la validación de un contrato de migración.
-     * Invoca secuencialmente las validaciones de orden de secciones, información
-     * de la migración y la configuración detallada de las tablas.
-     *
-     * @param contract     El objeto MigrationContract parseado a partir del YAML.
-     * @param contractPath La ruta física del archivo contract.yaml analizado.
-     * @throws InvalidContractException Si alguna de las reglas de validación estricta falla.
-     */
     public static void validate(MigrationContract contract, Path contractPath) {
         if (contract == null) {
             throw new InvalidContractException("El contrato proporcionado es nulo.");
@@ -45,13 +32,6 @@ public class ContractValidator {
         log.info("Validación del contrato completada con éxito.");
     }
 
-    /**
-     * Comprueba el orden físico de las secciones raíz dentro del archivo original.
-     * Para garantizar la consistencia, exige que 'migration' 
-     * debe ir obligatoriamente antes de 'tables'.
-     *
-     * @param originalFile La ruta del fichero YAML para ser leído en texto plano.
-     */
     private static void validateSectionOrder(Path originalFile) {
         try {
             List<String> lines = Files.readAllLines(originalFile);
@@ -72,12 +52,6 @@ public class ContractValidator {
         }
     }
 
-    /**
-     * Verifica que la sección obligatoria 'migration' exista y cuente con
-     * sus propiedades fundamentales ('name' y 'version') debidamente rellenadas.
-     *
-     * @param contract El contrato de migración bajo evaluación.
-     */
     private static void validateMigrationSection(MigrationContract contract) {
         if (contract.getMigration() == null) {
             throw new InvalidContractException("Falta la sección obligatoria 'migration' en el contrato.");
@@ -92,15 +66,6 @@ public class ContractValidator {
         }
     }
 
-
-    /**
-     * Recorre cada una de las tablas definidas asegurando la integridad
-     * de sus identificadores, referencias de esquemas origen/destino ('source' y 'target')
-     * y la coherencia de sus tipos de migración ('incremental', 'full').
-     * Por último, delega en subvalidaciones en caso de encontrarse configuraciones extra.
-     *
-     * @param contract El contrato global cuyo mapa de tablas será analizado.
-     */
     private static void validateTablesSection(MigrationContract contract) {
         if (contract.getTables() == null || contract.getTables().isEmpty()) {
             throw new InvalidContractException("El contrato debe tener al menos una tabla definida en la sección 'tables'.");
@@ -124,7 +89,6 @@ public class ContractValidator {
             }
             activeTables++;
 
-            // Validar que se ha especificado correctamente el origen y el destino
             if (tableDef.getSource() == null || tableDef.getSource().getTable() == null || tableDef.getSource().getTable().trim().isEmpty()) {
                 throw new InvalidContractException("La tabla '" + tableName + "' carece de especificación válida en el origen 'source.table'.");
             }
@@ -137,7 +101,6 @@ public class ContractValidator {
             validateOptionalSqlIdentifier(tableName, "target.schema", tableDef.getTarget().getSchema());
             validateSqlIdentifier(tableName, "target.table", tableDef.getTarget().getTable());
 
-            // Validar que el tipo de migración está presente y concuerda con sus sub-configuraciones
             String migType = tableDef.getMigrationType();
             if (migType == null || migType.trim().isEmpty()) {
                 throw new InvalidContractException("El tipo de migración 'migrationType' no está definido para la estructura '" + tableName + "'.");

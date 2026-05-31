@@ -22,17 +22,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * Validador encargado de comprobar la compatibilidad estructural entre las tablas
- * de origen y destino antes de ejecutar el flujo de datos.
- */
 public class SchemaCompatibilityValidator {
 
     private static final Logger log = LoggerFactory.getLogger(SchemaCompatibilityValidator.class);
 
-    /**
-     * Valida la existencia y accesibilidad de las tablas de origen.
-     */
     public static void validateSourceSchemas(MigrationContract contract) {
         validateSourceSchemas(contract, DatabaseConnectionManager::getConnection);
     }
@@ -72,10 +65,6 @@ public class SchemaCompatibilityValidator {
         validateTargetAndMapping(contract, DatabaseConnectionManager::getConnection, DatabaseConnectionManager::getConnection);
     }
 
-    /**
-     * Valida que las tablas destino existan tras Liquibase y que mantengan un mapeo estructural compatible
-     * con las tablas origen: columnas, tipos JDBC, longitudes, nullability, claves primarias y claves foraneas basicas.
-     */
     static void validateTargetAndMapping(MigrationContract contract,
                                          ConnectionFactory sourceConnectionFactory,
                                          ConnectionFactory targetConnectionFactory) {

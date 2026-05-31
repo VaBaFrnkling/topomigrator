@@ -49,11 +49,9 @@ public class NiFiClient {
     private String jwtToken;
 
     public NiFiClient() {
-        // En docker-compose.yaml está como NIFI_BASE_URL: https://nifi:8443/nifi-api
         String envUrl = System.getenv("NIFI_BASE_URL");
         this.baseUrl = envUrl != null ? envUrl : "https://localhost:8443/nifi-api";
         
-        // Credenciales obligatorias desde variables de entorno (.env / docker-compose)
         String envUser = System.getenv("NIFI_USERNAME");
         if (envUser == null || envUser.trim().isEmpty()) {
             throw new IllegalStateException("La variable de entorno NIFI_USERNAME es obligatoria y no está definida.");
@@ -108,7 +106,6 @@ public class NiFiClient {
             SSLContext sslContext = SSLContext.getInstance("TLS");
             sslContext.init(null, trustAllCerts, new SecureRandom());
             
-            // System property for allowing insecure hostnames with Java 11+ (usa jdk.internal pero es universal)
             System.setProperty("jdk.internal.httpclient.disableHostnameVerification", "true");
 
             this.httpClient = builder
@@ -219,7 +216,6 @@ public class NiFiClient {
         byte[] fileBytes = Files.readAllBytes(flowJsonPath);
         String fileContent = new String(fileBytes, StandardCharsets.UTF_8);
 
-        // Parametrización en caliente: Buscamos e insertamos los tokens dinámicos de cada tabla
         if (dynamicVariables != null) {
             for (Map.Entry<String, String> entry : dynamicVariables.entrySet()) {
                 fileContent = fileContent.replace(entry.getKey(), entry.getValue());
@@ -228,33 +224,27 @@ public class NiFiClient {
 
         StringBuilder sb = new StringBuilder();
 
-        // Param: clientId
         sb.append("--").append(boundary).append(crlf);
         sb.append("Content-Disposition: form-data; name=\"clientId\"").append(crlf).append(crlf);
         sb.append(clientId).append(crlf);
 
-        // Param: groupName
         sb.append("--").append(boundary).append(crlf);
         sb.append("Content-Disposition: form-data; name=\"groupName\"").append(crlf).append(crlf);
         sb.append(groupName).append(crlf);
 
-        // Param: positionX
         sb.append("--").append(boundary).append(crlf);
         sb.append("Content-Disposition: form-data; name=\"positionX\"").append(crlf).append(crlf);
         sb.append("0").append(crlf);
 
-        // Param: positionY
         sb.append("--").append(boundary).append(crlf);
         sb.append("Content-Disposition: form-data; name=\"positionY\"").append(crlf).append(crlf);
         sb.append(positionY).append(crlf);
 
-        // Param: file
         sb.append("--").append(boundary).append(crlf);
         sb.append("Content-Disposition: form-data; name=\"file\"; filename=\"flow.json\"").append(crlf);
         sb.append("Content-Type: application/json").append(crlf).append(crlf);
         sb.append(fileContent).append(crlf);
 
-        // Finale
         sb.append("--").append(boundary).append("--").append(crlf);
 
         HttpRequest request = HttpRequest.newBuilder()

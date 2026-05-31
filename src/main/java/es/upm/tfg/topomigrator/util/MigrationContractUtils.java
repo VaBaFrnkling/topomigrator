@@ -6,18 +6,11 @@ import es.upm.tfg.topomigrator.model.TableMigration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Utilidades de manipulación del contrato de migración.
- */
 public final class MigrationContractUtils {
 
     private MigrationContractUtils() {
     }
 
-    /**
-     * Devuelve una copia superficial del contrato conservando únicamente las tablas activas
-     * (enabled=true). El resto de metadatos y la configuración de base de datos se mantienen.
-     */
     public static MigrationContract retainEnabledTables(MigrationContract originalContract) {
         if (originalContract == null) {
             throw new IllegalArgumentException("El contrato no puede ser nulo.");

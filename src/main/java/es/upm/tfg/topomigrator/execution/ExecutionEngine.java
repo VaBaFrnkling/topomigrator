@@ -120,6 +120,14 @@ public class ExecutionEngine {
     }
 
     public void executeMigration(List<TableNode> executionOrder, MigrationContract contract, List<ForeignKeyDependency> dependencies) {
+        executeMigration(executionOrder, contract, dependencies, List.of(), List.of());
+    }
+
+    public void executeMigration(List<TableNode> executionOrder,
+                                 MigrationContract contract,
+                                 List<ForeignKeyDependency> dependencies,
+                                 List<TableNode> blockedTablesByCycle,
+                                 List<TableNode> cyclicTables) {
         logger.info("Iniciando Motor de Ejecución de Apache NiFi y recolección de Trazas...");
 
         SummaryTrace summary = new SummaryTrace();
@@ -137,9 +145,10 @@ public class ExecutionEngine {
         summary.timing.startTime = LocalDateTime.now().format(formatter);
         long globalStartMs = System.currentTimeMillis();
 
-        summary.executionOrder = executionOrder.stream().map(TableNode::getName).collect(Collectors.toList());
+        List<TableNode> safeExecutionOrder = executionOrder != null ? executionOrder : List.of();
+        summary.executionOrder = safeExecutionOrder.stream().map(TableNode::getName).collect(Collectors.toList());
         summary.tables = new SummaryTrace.TablesSummary();
-        summary.tables.total = executionOrder.size();
+        summary.tables.total = safeExecutionOrder.size();
 
         summary.tableExecutionDetails = new ArrayList<>();
         summary.failedTables = new ArrayList<>();
@@ -147,80 +156,86 @@ public class ExecutionEngine {
 
         Map<String, String> tableIdentityIndex = buildTableIdentityIndex(contract);
         Map<String, List<String>> parentsByTable = buildParentsByTable(dependencies, tableIdentityIndex);
-        summary.dependencyAnalysis = buildDependencyAnalysis(executionOrder, parentsByTable, tableIdentityIndex);
+        summary.dependencyAnalysis = buildDependencyAnalysis(buildAllContractTableNodes(contract), parentsByTable, tableIdentityIndex);
         Set<String> failedOrBlockedTables = new HashSet<>();
+        int plannedCycleFailures = countUniqueCanonicalTables(cyclicTables, tableIdentityIndex);
+        int plannedCycleBlocks = countUniqueCanonicalTables(blockedTablesByCycle, tableIdentityIndex);
         RuntimeException criticalFailure = null;
+        int orderCounter = 1;
 
         try {
-            Path flowPath = Paths.get("flows", "MainMigration.json");
-            if (!Files.exists(flowPath)) {
-                logger.error("ERROR FATAL: Plantilla base {} no encontrada. Abortando motor NiFi.", flowPath.toAbsolutePath());
-                throw new IllegalStateException("Plantilla MainMigration.json no existe en el disco.");
-            }
-
-            nifiClient.authenticate();
-            String rootId = nifiClient.getRootProcessGroupId();
-            nifiClient.cleanupStaleTopomigratorProcessGroups(rootId);
-
-            int yOffset = 0;
-            int orderCounter = 1;
-
-            for (TableNode tableNode : executionOrder) {
-                String tableName = tableNode.getName();
-                TableMigration tableConfig = resolveTableConfig(contract, tableName);
-                if (tableConfig != null) {
-                    tableName = resolveOriginalTableKey(contract, tableName);
+            if (!safeExecutionOrder.isEmpty()) {
+                Path flowPath = Paths.get("flows", "MainMigration.json");
+                if (!Files.exists(flowPath)) {
+                    logger.error("ERROR FATAL: Plantilla base {} no encontrada. Abortando motor NiFi.", flowPath.toAbsolutePath());
+                    throw new IllegalStateException("Plantilla MainMigration.json no existe en el disco.");
                 }
 
-                logger.info(">> [{}/{}] Preparando migración para la tabla: {}", orderCounter, executionOrder.size(), tableName);
+                nifiClient.authenticate();
+                String rootId = nifiClient.getRootProcessGroupId();
+                nifiClient.cleanupStaleTopomigratorProcessGroups(rootId);
 
-                TableTrace tableTrace = createBaseTableTrace(executionId, idGenerator, orderCounter, tableName, tableConfig);
-                long tStartMs = System.currentTimeMillis();
+                int yOffset = 0;
 
-                try {
-                    if (tableConfig == null) {
-                        throw new IllegalStateException("No se encontró configuración de migración para la tabla " + tableName);
+                for (TableNode tableNode : safeExecutionOrder) {
+                    String tableName = tableNode.getName();
+                    TableMigration tableConfig = resolveTableConfig(contract, tableName);
+                    if (tableConfig != null) {
+                        tableName = resolveOriginalTableKey(contract, tableName);
                     }
 
-                    List<String> blockingParents = getBlockingParents(tableName, parentsByTable, failedOrBlockedTables, tableIdentityIndex);
-                    if (!blockingParents.isEmpty()) {
-                        markTableAsBlocked(summary, tableTrace, tableName, blockingParents);
-                        failedOrBlockedTables.add(canonicalTableKey(tableName, tableIdentityIndex));
-                    } else {
-                        executeSingleTable(rootId, flowPath, yOffset, executionId, tableName, contract, tableConfig, tableTrace);
-                        summary.tables.successful++;
-                    }
-                } catch (Exception e) {
-                    logger.error("Error migrando tabla {} ({}): {}", tableName, e.getClass().getSimpleName(), sanitizeDiagnostic(e.getMessage()));
-                    markTableAsFailed(summary, tableTrace, tableName, e);
-                    errorArtifactWriter.writeTableError(
-                            executionId,
-                            tableTrace.tableExecutionId,
-                            "NIFI_TABLE_EXECUTION",
-                            formatTraceTable(tableTrace, tableName),
-                            e
-                    );
-                    failedOrBlockedTables.add(canonicalTableKey(tableName, tableIdentityIndex));
-                } finally {
-                    tableTrace.timing.endTime = LocalDateTime.now().format(formatter);
-                    tableTrace.timing.durationMs = System.currentTimeMillis() - tStartMs;
+                    logger.info(">> [{}/{}] Preparando migración para la tabla: {}", orderCounter, safeExecutionOrder.size(), tableName);
+
+                    TableTrace tableTrace = createBaseTableTrace(executionId, idGenerator, orderCounter, tableName, tableConfig);
+                    long tStartMs = System.currentTimeMillis();
+
                     try {
-                        ensureCanonicalFinalStatus(tableTrace);
-                    } catch (IllegalStateException invariantEx) {
-                        logger.error("Invariante de estado roto para tabla {}: {}. Se fuerza FAILED.", tableName, invariantEx.getMessage());
-                        setMigrationStatus(tableTrace, STATUS_FAILED);
-                        if (tableTrace.errors == null) {
-                            tableTrace.errors = new ArrayList<>();
+                        if (tableConfig == null) {
+                            throw new IllegalStateException("No se encontró configuración de migración para la tabla " + tableName);
                         }
-                        tableTrace.errors.add("Estado final no canonico corregido automaticamente a FAILED.");
-                    }
-                    summary.tableExecutionDetails.add(toSummary(tableName, tableTrace, orderCounter));
-                    traceManager.writeTableTrace(tableTrace);
 
-                    yOffset += 300;
-                    orderCounter++;
+                        List<String> blockingParents = getBlockingParents(tableName, parentsByTable, failedOrBlockedTables, tableIdentityIndex);
+                        if (!blockingParents.isEmpty()) {
+                            markTableAsBlocked(summary, tableTrace, tableName, blockingParents);
+                            failedOrBlockedTables.add(canonicalTableKey(tableName, tableIdentityIndex));
+                        } else {
+                            executeSingleTable(rootId, flowPath, yOffset, executionId, tableName, contract, tableConfig, tableTrace);
+                            summary.tables.successful++;
+                        }
+                    } catch (Exception e) {
+                        logger.error("Error migrando tabla {} ({}): {}", tableName, e.getClass().getSimpleName(), sanitizeDiagnostic(e.getMessage()));
+                        markTableAsFailed(summary, tableTrace, tableName, e);
+                        errorArtifactWriter.writeTableError(
+                                executionId,
+                                tableTrace.tableExecutionId,
+                                "NIFI_TABLE_EXECUTION",
+                                formatTraceTable(tableTrace, tableName),
+                                e
+                        );
+                        failedOrBlockedTables.add(canonicalTableKey(tableName, tableIdentityIndex));
+                    } finally {
+                        tableTrace.timing.endTime = LocalDateTime.now().format(formatter);
+                        tableTrace.timing.durationMs = System.currentTimeMillis() - tStartMs;
+                        try {
+                            ensureCanonicalFinalStatus(tableTrace);
+                        } catch (IllegalStateException invariantEx) {
+                            logger.error("Invariante de estado roto para tabla {}: {}. Se fuerza FAILED.", tableName, invariantEx.getMessage());
+                            setMigrationStatus(tableTrace, STATUS_FAILED);
+                            if (tableTrace.errors == null) {
+                                tableTrace.errors = new ArrayList<>();
+                            }
+                            tableTrace.errors.add("Estado final no canonico corregido automaticamente a FAILED.");
+                        }
+                        summary.tableExecutionDetails.add(toSummary(tableName, tableTrace, orderCounter));
+                        traceManager.writeTableTrace(tableTrace);
+
+                        yOffset += 300;
+                        orderCounter++;
+                    }
                 }
             }
+
+            appendNonExecutableCycleTraces(summary, executionId, idGenerator, orderCounter, contract, cyclicTables, blockedTablesByCycle);
 
         } catch (Exception e) {
             logger.error("Fallo crítico general en el motor de ejecución y tracking: {}", sanitizeDiagnostic(e.getMessage()), e);
@@ -236,7 +251,7 @@ public class ExecutionEngine {
             if (criticalFailure != null) {
                 throw criticalFailure;
             }
-            if (summary.tables.failed > 0 || summary.tables.blocked > 0) {
+            if (summary.tables.failed > plannedCycleFailures || summary.tables.blocked > plannedCycleBlocks) {
                 throw new IllegalStateException("La migración terminó con " + summary.tables.failed
                         + " tabla(s) fallida(s) y " + summary.tables.blocked + " tabla(s) bloqueada(s). Consultar outputs/traces/summary.json y logs.");
             }
@@ -514,6 +529,100 @@ public class ExecutionEngine {
         }
 
         return analysis;
+    }
+
+    private List<TableNode> buildAllContractTableNodes(MigrationContract contract) {
+        if (contract == null || contract.getTables() == null) {
+            return List.of();
+        }
+        return contract.getTables().keySet().stream()
+                .map(TableNode::new)
+                .collect(Collectors.toList());
+    }
+
+    private int countUniqueCanonicalTables(List<TableNode> tableNodes, Map<String, String> tableIdentityIndex) {
+        if (tableNodes == null || tableNodes.isEmpty()) {
+            return 0;
+        }
+        return (int) tableNodes.stream()
+                .filter(tableNode -> tableNode != null)
+                .map(TableNode::getName)
+                .map(tableName -> canonicalTableKey(tableName, tableIdentityIndex))
+                .distinct()
+                .count();
+    }
+
+    private void appendNonExecutableCycleTraces(SummaryTrace summary,
+                                                String executionId,
+                                                ExecutionIdGenerator idGenerator,
+                                                int orderCounter,
+                                                MigrationContract contract,
+                                                List<TableNode> cyclicTables,
+                                                List<TableNode> blockedTablesByCycle) {
+        int nextOrder = appendNonExecutableTraces(
+                summary,
+                executionId,
+                idGenerator,
+                orderCounter,
+                contract,
+                cyclicTables,
+                STATUS_FAILED,
+                "Tabla no ejecutada porque participa en un ciclo de dependencias."
+        );
+        appendNonExecutableTraces(
+                summary,
+                executionId,
+                idGenerator,
+                nextOrder,
+                contract,
+                blockedTablesByCycle,
+                STATUS_BLOCKED,
+                "Tabla no ejecutada porque depende de tablas incluidas en un ciclo de dependencias."
+        );
+    }
+
+    private int appendNonExecutableTraces(SummaryTrace summary,
+                                          String executionId,
+                                          ExecutionIdGenerator idGenerator,
+                                          int orderCounter,
+                                          MigrationContract contract,
+                                          List<TableNode> tableNodes,
+                                          String status,
+                                          String reason) {
+        if (tableNodes == null || tableNodes.isEmpty()) {
+            return orderCounter;
+        }
+
+        int nextOrder = orderCounter;
+        for (TableNode tableNode : tableNodes) {
+            String tableName = resolveOriginalTableKey(contract, tableNode.getName());
+            TableMigration tableConfig = resolveTableConfig(contract, tableName);
+            TableTrace tableTrace = createBaseTableTrace(executionId, idGenerator, nextOrder, tableName, tableConfig);
+            tableTrace.timing = new Timing();
+            tableTrace.recordsProcessed = 0L;
+            markCleanupResult(tableTrace, CLEANUP_STATUS_SKIPPED, CLEANUP_PHASE_PROCESS_GROUP, null,
+                    "No se creó Process Group temporal porque la tabla no era ejecutable.");
+            setMigrationStatus(tableTrace, status);
+            tableTrace.auditMetrics.consistencyStatus = status;
+            tableTrace.auditMetrics.warnings.add(reason);
+
+            if (STATUS_FAILED.equals(status)) {
+                tableTrace.errors.add(reason);
+                summary.tables.failed++;
+                SummaryTrace.FailedTable failedTable = new SummaryTrace.FailedTable();
+                failedTable.table = tableName;
+                failedTable.reason = reason;
+                summary.failedTables.add(failedTable);
+            } else if (STATUS_BLOCKED.equals(status)) {
+                summary.tables.blocked++;
+                summary.blockedTables.add(tableName);
+            }
+
+            summary.tableExecutionDetails.add(toSummary(tableName, tableTrace, nextOrder));
+            traceManager.writeTableTrace(tableTrace);
+            nextOrder++;
+        }
+        return nextOrder;
     }
 
     private List<String> getBlockingParents(String tableName,

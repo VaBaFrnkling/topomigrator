@@ -32,9 +32,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * Applies one Liquibase changelog per active target table.
- */
 public class LiquibaseSchemaExecutor {
     private static final Logger log = LoggerFactory.getLogger(LiquibaseSchemaExecutor.class);
 

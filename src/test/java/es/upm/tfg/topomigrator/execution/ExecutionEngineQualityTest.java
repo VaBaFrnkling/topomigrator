@@ -22,6 +22,7 @@ import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
@@ -83,6 +84,62 @@ public class ExecutionEngineQualityTest {
         assertTrue(nifi.uploadedGroups.get(0).contains("Migracion_customers"));
         assertEquals(List.of("NIFI_TABLE_EXECUTION:public.customers:RuntimeException"), harness.errors.tableErrors);
         assertEquals(List.of(), harness.errors.executionErrors);
+    }
+
+    @Test
+    public void executeMigrationWritesCycleTablesAsFailedAndBlockedWithoutErrorArtifacts() throws Exception {
+        RecordingNiFiClient nifi = new RecordingNiFiClient();
+        RecordingTraceabilityManager traces = new RecordingTraceabilityManager();
+        CountingMetricsService metrics = new CountingMetricsService(
+                Map.of("projects", 4L),
+                Map.of("projects", List.of(0L, 4L))
+        );
+        EngineHarness harness = engine(nifi, traces, metrics);
+        MigrationContract contract = QualityTestData.contractWith(
+                QualityTestData.fullTable("projects"),
+                QualityTestData.fullTable("tasks"),
+                QualityTestData.fullTable("task_links"),
+                QualityTestData.fullTable("task_assignments")
+        );
+
+        harness.engine.executeMigration(
+                List.of(new TableNode("projects")),
+                contract,
+                List.of(
+                        new ForeignKeyDependency("tasks", "task_links"),
+                        new ForeignKeyDependency("task_links", "tasks"),
+                        new ForeignKeyDependency("tasks", "task_assignments")
+                ),
+                List.of(new TableNode("task_assignments")),
+                List.of(new TableNode("task_links"), new TableNode("tasks"))
+        );
+
+        assertEquals(4, traces.summary.tables.total);
+        assertEquals(1, traces.summary.tables.successful);
+        assertEquals(2, traces.summary.tables.failed);
+        assertEquals(1, traces.summary.tables.blocked);
+        assertEquals(List.of(), harness.errors.tableErrors);
+        assertEquals(List.of(), harness.errors.executionErrors);
+
+        TableTrace cyclicTrace = traces.tableTraces.stream()
+                .filter(trace -> trace.table.target.name.equals("tasks"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("FAILED", cyclicTrace.status);
+        assertEquals(0L, cyclicTrace.recordsProcessed);
+        assertNull(cyclicTrace.timing.startTime);
+        assertNull(cyclicTrace.timing.endTime);
+        assertEquals(0L, cyclicTrace.timing.durationMs);
+
+        TableTrace blockedTrace = traces.tableTraces.stream()
+                .filter(trace -> trace.table.target.name.equals("task_assignments"))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("BLOCKED", blockedTrace.status);
+        assertEquals(0L, blockedTrace.recordsProcessed);
+        assertNull(blockedTrace.timing.startTime);
+        assertNull(blockedTrace.timing.endTime);
+        assertEquals(0L, blockedTrace.timing.durationMs);
     }
 
     @Test

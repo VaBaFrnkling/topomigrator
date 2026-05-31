@@ -4,6 +4,7 @@ import es.upm.tfg.topomigrator.audit.ErrorArtifactWriter;
 import es.upm.tfg.topomigrator.config.ContractLoader;
 import es.upm.tfg.topomigrator.execution.ExecutionEngine;
 import es.upm.tfg.topomigrator.execution.LiquibaseSchemaExecutor;
+import es.upm.tfg.topomigrator.model.ConnectionConfig;
 import es.upm.tfg.topomigrator.model.DatabaseConfig;
 import es.upm.tfg.topomigrator.model.MigrationContract;
 import es.upm.tfg.topomigrator.model.TableMigration;
@@ -77,21 +78,32 @@ public class App {
             runPhase("SOURCE_SCHEMA_VALIDATION", errorArtifactWriter, errorContext,
                     () -> SchemaCompatibilityValidator.validateSourceSchemas(contract));
 
-            runPhase("CHANGELOG_VALIDATION", errorArtifactWriter, errorContext,
-                    () -> TargetChangelogValidator.validate(contract));
-
             DependencyPlan dependencyPlan = runPhase("DEPENDENCY_RESOLUTION", errorArtifactWriter, errorContext,
                     () -> resolveDependencyPlan(contract));
 
-            runPhase("LIQUIBASE_EXECUTION", errorArtifactWriter, errorContext,
-                    () -> LiquibaseSchemaExecutor.applyTargetSchemas(contract, dependencyPlan.getExecutionOrder()));
+            MigrationContract executableContract = filterContractForExecutableTables(contract, dependencyPlan.getExecutionOrder());
+            if (executableContract.getTables() == null || executableContract.getTables().isEmpty()) {
+                logger.warn("No hay tablas ejecutables tras resolver dependencias. Se generaran trazas para tablas no ejecutables.");
+            } else {
+                runPhase("CHANGELOG_VALIDATION", errorArtifactWriter, errorContext,
+                        () -> TargetChangelogValidator.validate(executableContract));
 
-            runPhase("SCHEMA_COMPATIBILITY_VALIDATION", errorArtifactWriter, errorContext,
-                    () -> SchemaCompatibilityValidator.validateTargetAndMapping(contract));
+                runPhase("LIQUIBASE_EXECUTION", errorArtifactWriter, errorContext,
+                        () -> LiquibaseSchemaExecutor.applyTargetSchemas(executableContract, dependencyPlan.getExecutionOrder()));
+
+                runPhase("SCHEMA_COMPATIBILITY_VALIDATION", errorArtifactWriter, errorContext,
+                        () -> SchemaCompatibilityValidator.validateTargetAndMapping(executableContract));
+            }
 
             ExecutionEngine engine = runPhase("NIFI_CLIENT_INITIALIZATION", errorArtifactWriter, errorContext,
                     () -> new ExecutionEngine(errorArtifactWriter));
-            engine.executeMigration(dependencyPlan.getExecutionOrder(), contract, dependencyPlan.getDependencies());
+            engine.executeMigration(
+                    dependencyPlan.getExecutionOrder(),
+                    contract,
+                    dependencyPlan.getDependencies(),
+                    dependencyPlan.getBlockedTablesByCycle(),
+                    dependencyPlan.getCyclicTables()
+            );
 
             logger.info("Migracion orquestada y desplegada correctamente.");
 
@@ -130,8 +142,41 @@ public class App {
         }
 
         DependencyResolver resolver = new DependencyResolver();
-        List<TableNode> executionOrder = resolver.resolveExecutionOrder(contract.getTables().keySet(), dependencies);
-        return new DependencyPlan(dependencies, executionOrder);
+        DependencyResolver.BestEffortPlan bestEffortPlan = resolver.resolveBestEffortPlan(contract.getTables().keySet(), dependencies);
+        return new DependencyPlan(
+                dependencies,
+                bestEffortPlan.getExecutableOrder(),
+                bestEffortPlan.getBlockedTables(),
+                bestEffortPlan.getCyclicTables()
+        );
+    }
+
+    static MigrationContract filterContractForExecutableTables(MigrationContract contract, List<TableNode> executionOrder) {
+        MigrationContract executableContract = new MigrationContract();
+        executableContract.setMigration(contract.getMigration());
+        executableContract.setDatabase(contract.getDatabase());
+
+        Map<String, TableMigration> executableTables = new LinkedHashMap<>();
+        if (executionOrder != null) {
+            for (TableNode tableNode : executionOrder) {
+                String tableId = resolveOriginalTableKey(contract, tableNode.getName());
+                TableMigration table = contract.getTables().get(tableId);
+                if (table != null) {
+                    executableTables.put(tableId, table);
+                }
+            }
+        }
+        executableContract.setTables(executableTables);
+        return executableContract;
+    }
+
+    private static String resolveOriginalTableKey(MigrationContract contract, String tableName) {
+        for (String key : contract.getTables().keySet()) {
+            if (key.equalsIgnoreCase(tableName)) {
+                return key;
+            }
+        }
+        return tableName;
     }
 
     private static <T> T runPhase(String phase,
@@ -168,16 +213,23 @@ public class App {
 
     @FunctionalInterface
     interface SourceConnectionFactory {
-        Connection getConnection(es.upm.tfg.topomigrator.model.ConnectionConfig config) throws Exception;
+        Connection getConnection(ConnectionConfig config) throws Exception;
     }
 
     static final class DependencyPlan {
         private final List<ForeignKeyDependency> dependencies;
         private final List<TableNode> executionOrder;
+        private final List<TableNode> blockedTablesByCycle;
+        private final List<TableNode> cyclicTables;
 
-        DependencyPlan(List<ForeignKeyDependency> dependencies, List<TableNode> executionOrder) {
+        DependencyPlan(List<ForeignKeyDependency> dependencies,
+                       List<TableNode> executionOrder,
+                       List<TableNode> blockedTablesByCycle,
+                       List<TableNode> cyclicTables) {
             this.dependencies = dependencies;
             this.executionOrder = executionOrder;
+            this.blockedTablesByCycle = blockedTablesByCycle;
+            this.cyclicTables = cyclicTables;
         }
 
         List<ForeignKeyDependency> getDependencies() {
@@ -186,6 +238,14 @@ public class App {
 
         List<TableNode> getExecutionOrder() {
             return executionOrder;
+        }
+
+        List<TableNode> getBlockedTablesByCycle() {
+            return blockedTablesByCycle;
+        }
+
+        List<TableNode> getCyclicTables() {
+            return cyclicTables;
         }
     }
 }

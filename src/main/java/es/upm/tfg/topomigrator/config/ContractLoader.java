@@ -21,10 +21,6 @@ import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/**
- * Lee y parsea el fichero contract.yaml usando SnakeYAML,
- * devolviendo un objeto MigrationContract listo para usar.
- */
 public class ContractLoader {
 
     private static final Logger log = LoggerFactory.getLogger(ContractLoader.class);
@@ -48,14 +44,6 @@ public class ContractLoader {
         this.systemUserProvider = systemUserProvider;
     }
 
-    /**
-     * Carga el contrato desde la ruta indicada y fusiona sus propiedades
-     * con las variables de entorno.
-     *
-     * @param contractPath Ruta absoluta o relativa al fichero contract.yaml
-     * @return MigrationContract con toda la configuracion parseada y actualizada
-     * @throws IOException si el fichero no existe o no puede leerse
-     */
     public MigrationContract load(Path contractPath) throws IOException {
         log.info("Cargando contrato desde: {}", contractPath.toAbsolutePath());
 
