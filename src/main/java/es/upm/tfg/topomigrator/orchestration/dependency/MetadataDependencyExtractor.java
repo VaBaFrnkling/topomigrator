@@ -14,21 +14,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/**
- * Componente responsable de extraer metadatos físicos de la base de datos origen.
- * Conecta el mundo de la base de datos relacional con el modelo de dependencias
- * del Topomigrator, recuperando las Foreign Keys dinámicamente mediante la API JDBC.
- */
 public class MetadataDependencyExtractor {
 
     private static final Logger logger = LoggerFactory.getLogger(MetadataDependencyExtractor.class);
 
-    /**
-     * Extrae todas las dependencias de clave foránea (padre-hija) basándose en
-     * el diccionario de la base de datos y la lista de tablas físicas a migrar.
-     *
-     * Cada tabla incluida debe venir con el formato schema.table.
-     */
     public List<ForeignKeyDependency> extractDependencies(Connection connection, Set<String> includedTableIds) throws SQLException {
         if (includedTableIds == null || includedTableIds.isEmpty()) {
             logger.warn("Se ha invocado el extractor físico pero no existen tablas en el lote. Retornando matriz vacía.");

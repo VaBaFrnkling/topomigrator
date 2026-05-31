@@ -28,10 +28,6 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
-/**
- * Cliente REST para comunicarse con la API de Apache NiFi.
- * Soporta autenticación mediante JWT y conexiones HTTPS (incluso autofirmadas).
- */
 public class NiFiClient {
 
     private static final Logger logger = LoggerFactory.getLogger(NiFiClient.class);
@@ -118,9 +114,6 @@ public class NiFiClient {
         }
     }
 
-    /**
-     * Autentica con NiFi devolviendo el Bearer Token.
-     */
     public void authenticate() throws Exception {
         logger.debug("Intentando autenticar en NiFi: {} mediante /access/token", baseUrl);
         
@@ -169,10 +162,6 @@ public class NiFiClient {
                 + AUTH_MAX_ATTEMPTS + " intentos.", lastError);
     }
 
-    /**
-     * Obtiene el ID del Process Group raíz (root) del canvas de NiFi.
-     * @return El UUID del process group raíz.
-     */
     public String getRootProcessGroupId() throws Exception {
         if (jwtToken == null) {
             throw new IllegalStateException("Cliente no autenticado. LLamar a authenticate() primero.");
@@ -196,14 +185,6 @@ public class NiFiClient {
         }
     }
 
-    /**
-     * Sube un fichero JSON de Flujo NiFi al orchestrador usando el endpoint de upload form-data en versión 2.x
-     * @param parentId El UUID del process group padre donde residirá
-     * @param groupName El nombre del nuevo Process Group
-     * @param positionY Coordenada para que no colapsen visualmente
-     * @param flowJsonPath La ruta al fichero con el JSON Template (flujo)
-     * @param dynamicVariables Mapa clave-valor (ej: "##TABLA_ORIGEN##" -> "clientes") a incrustar
-     */
     public String uploadFlowDefinition(String parentId, String groupName, int positionY, Path flowJsonPath, Map<String, String> dynamicVariables) throws Exception {
         if (jwtToken == null) {
             throw new IllegalStateException("Cliente no autenticado.");
@@ -274,11 +255,6 @@ public class NiFiClient {
         }
     }
 
-    /**
-     * Inicia o detiene los procesadores dentro de un Process Group.
-     * @param processGroupId El ID del grupo subido.
-     * @param state "RUNNING" o "STOPPED"
-     */
     public void changeProcessGroupState(String processGroupId, String state) throws Exception {
         if (jwtToken == null) throw new IllegalStateException("Cliente no autenticado.");
 
@@ -298,9 +274,6 @@ public class NiFiClient {
         }
     }
 
-    /**
-     * Obtiene las métricas en crudo del Process Group (bytes read, records, threads).
-     */
     public JsonObject getProcessGroupStatus(String processGroupId) throws Exception {
         return getProcessGroupStatus(processGroupId, false);
     }

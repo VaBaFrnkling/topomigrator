@@ -29,10 +29,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-/**
- * Motor de ejecución que coordina la instanciación de flujos de NiFi,
- * supervisa su estado en vivo, propaga fallos a tablas dependientes y genera la auditoría JSON final.
- */
 public class ExecutionEngine {
 
     private static final Logger logger = LoggerFactory.getLogger(ExecutionEngine.class);
