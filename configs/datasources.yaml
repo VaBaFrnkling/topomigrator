@@ -1,7 +1,5 @@
-# ═══════════════════════════════════════════════════════════════════
-#  Datasources de TopoMigrator
-#  Ajusta las JDBC URLs y credenciales desde .env
-# ═══════════════════════════════════════════════════════════════════
+# Datasources de TopoMigrator
+# Ajusta las JDBC URLs y credenciales desde .env
 
 source:
   driver: ${SOURCE_DB_DRIVER:org.postgresql.Driver}
